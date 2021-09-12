@@ -1,5 +1,6 @@
 #!/bin/bash
 [ -z "$1" ] && echo "Usage: $0 psql_database_name [YYYY-MM-DDtHH:MM]" && exit 1
+cd "$(dirname "$0")"
 if [ ! -d venv ]; then
     python3 -m venv venv
     venv/bin/pip install requirements.txt

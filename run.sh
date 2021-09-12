@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 [ -z "${1-}" ] && echo "Usage: $0 psql_database_name [<regions.csv>]" && exit 1
+cd "$(dirname "$0")"
 PSQL=( psql "$1" -v ON_ERROR_STOP=1 )
 NEXT_TS="$(${PSQL[@]} -qAtc 'select ts + 1 from adiff_tracker_ts order by ts desc limit 1')"
 TS="$(venv/bin/python gen_adiff_timestamps.py)"
