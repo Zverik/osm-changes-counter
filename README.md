@@ -6,7 +6,7 @@ And with that we rank them to determine who did the most work.
 
 ## Usage
 
-You will need a PostgreSQL database. PostGIS is not needed. And Python 3.5+.
+You will need a PostgreSQL database. PostGIS is not needed. And Python 3.7+.
 
 Run `init.sh` with a database name: it will create a timestamp tracking table.
 The optional second parameter should be an UTC (!) timestamp in the past.
