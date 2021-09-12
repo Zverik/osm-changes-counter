@@ -92,8 +92,6 @@ def init_data_from_object(obj, backup=None):
         bounds = obj.find('bounds')
         if bounds is None:
             bounds = backup.find('bounds')
-        if bounds is None:
-            sys.stderr.write(f'Missing bounds for {result}\n')
         result.update({
             'lon': (float(bounds.get('minlon')) + float(bounds.get('maxlon'))) / 2,
             'lat': (float(bounds.get('minlat')) + float(bounds.get('maxlat'))) / 2,
@@ -240,8 +238,6 @@ def process_single_action(action, adiff, regions=None):
             ancestor = find_way_in_another_modified(obj, adiff, True)
             if ancestor is not None:
                 # Some way was split into this (and possibly others).
-                sys.stderr.write(f'Found an ancestor {ancestor.get("id")} for '
-                                 f'the created way {obj.get("id")}!\n')
                 atype = 'split'
                 data['prev_id'] = get_osm_id(ancestor)
                 old = ancestor  # just for comparing tags
@@ -249,8 +245,6 @@ def process_single_action(action, adiff, regions=None):
             ancestor = find_way_in_another_modified(old, adiff, False)
             if ancestor is not None:
                 # This way (and possibly others) were merged into the ancestor.
-                sys.stderr.write(f'Found an ancestor {ancestor.get("id")} for '
-                                 f'the deleted way {old.get("id")}!\n')
                 atype = 'join'
                 data['prev_id'] = get_osm_id(ancestor)
                 obj = ancestor  # just for comparing tags

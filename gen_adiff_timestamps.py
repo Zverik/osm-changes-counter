@@ -3,15 +3,24 @@ from datetime import datetime
 import sys
 
 if len(sys.argv) > 1 and '-' in sys.argv[1]:
-    try:
-        target_time = datetime.fromisoformat(' '.join(sys.argv[1:]))
-    except ValueError:
-        print('Please use format YYYY-MM-DDTHH:MM[:SS]')
-        sys.exit(1)
-    if target_time > datetime.utcnow():
-        print(f'Current UTC time is {datetime.utcnow():%Y-%m-%dt%H:%M}.')
-        sys.exit(1)
-    print(int(target_time.timestamp() / 60) - 22457216)
+    if sys.argv[1][0] == '-':
+        # Decode a timestamp. Super-hidden option!
+        try:
+            ts = 60 * (22457216 + int(sys.argv[1][1:]))
+        except ValueError:
+            print('Use either "-state" or a date for the first argument')
+            sys.exit(1)
+        print(datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M'))
+    else:
+        try:
+            target_time = datetime.fromisoformat(' '.join(sys.argv[1:]))
+        except ValueError:
+            print('Please use format YYYY-MM-DDTHH:MM[:SS]')
+            sys.exit(1)
+        if target_time > datetime.utcnow():
+            print(f'Current UTC time is {datetime.utcnow():%Y-%m-%dt%H:%M}.')
+            sys.exit(1)
+        print(int(target_time.timestamp() / 60) - 22457216)
 else:
     now = int(datetime.utcnow().timestamp() / 60) - 22457216
     from_ts = int(sys.argv[1]) + 1 if len(sys.argv) > 1 else now - 1
