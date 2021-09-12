@@ -226,6 +226,8 @@ def process_single_action(action, adiff, regions=None):
         return
     old = None if atype == 'create' else action.find('old')[0]
     data = init_data_from_object(obj, old)
+    if not data:
+        return
     if regions and not regions.is_empty():
         data['region'] = regions.find(data['lon'], data['lat'])
         if not data['region']:
