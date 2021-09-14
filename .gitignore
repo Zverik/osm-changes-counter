@@ -1,2 +1,6 @@
 *.adiff
 u*.csv
+.*.swp
+*.gz
+venv/
+__pycache__/

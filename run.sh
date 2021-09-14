@@ -7,8 +7,13 @@ PYTHON=venv/bin/python
 NEXT_TS="$(${PSQL[@]} -qAtc 'select ts + 1 from adiff_tracker_ts order by ts desc limit 1')"
 TS="$($PYTHON gen_adiff_timestamps.py)"
 for ts in $(seq $NEXT_TS $TS); do
-    echo "$(date +%H:%M:%S): $ts ($($PYTHON gen_adiff_timestamps.py -$ts))"
-    curl -s "http://overpass-api.de/api/augmented_diff?id=$ts" > $ts.adiff
+    local download_ok=
+    while [ -z "$download_ok" ]; do
+        echo "$(date +%H:%M:%S): $ts ($($PYTHON gen_adiff_timestamps.py -$ts))"
+        curl -s "http://overpass-api.de/api/augmented_diff?id=$ts" > $ts.adiff
+        grep -q '<action type=' $ts.adiff && download_ok=yes
+        [ -z "$download_ok" ] && sleep 20
+    done
     $PYTHON adiff_to_csv.py -t adiff_tracker ${2+-r "$2"} $ts.adiff | ${PSQL[@]}
     rm $ts.adiff
     ${PSQL[@]} -qAtc "insert into adiff_tracker_ts (ts) values ($ts);"
