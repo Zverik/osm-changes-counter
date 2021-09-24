@@ -18,6 +18,7 @@ class StoredObject:
         elif isinstance(nodes, str):
             self.nodes = [int(n) for n in nodes.split(',')]
         else:
+            # Also clears nodes if it's an empty list
             self.nodes = None if not nodes else [int(n) for n in nodes]
         self.tags = json.loads(tags) if isinstance(tags, str) else tags
 
@@ -65,7 +66,8 @@ class OscDatabase:
         return StoredObject(typ, osm_id, row[0], row[1], row[2])
 
     def save_object(self, obj):
-        tags = obj.tags if not self.tag_filter else self.tag_filter.filter_relevant(obj.tags)
+        tags = obj.tags  # if not self.tag_filter else self.tag_filter.filter_relevant(obj.tags)
+        # Not filtering out non-relevant tags since we rely on them when assessing full tags
         self.cur.execute(
             f"""insert into {TABLE_OBJECTS}
             (osm_id, version, tags, nodes) values (%s, %s, %s, %s)

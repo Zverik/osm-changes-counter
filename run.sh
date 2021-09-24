@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-[ -z "${1-}" ] && echo "Usage: $0 psql_database_name [<regions.csv>]" && exit 1
+[ $# -lt 2 ] && echo "Usage: $0 psql_database_name tags.lst [<regions.csv>]" && exit 1
 cd "$(dirname "$0")"
 PSQL=( psql "$1" -v ON_ERROR_STOP=1 )
 OVERPASS='http://overpass-api.de/api'
@@ -15,7 +15,7 @@ for ts in $(seq $NEXT_TS $TS); do
         grep -q '<action type=' $ts.adiff && download_ok=yes
         [ -z "$download_ok" ] && sleep 20
     done
-    $PYTHON adiff_to_csv.py -t adiff_tracker ${2+-r "$2"} $ts.adiff | ${PSQL[@]}
+    $PYTHON adiff_to_csv.py -t "$2" -p adiff_tracker ${3+-r "$3"} $ts.adiff | ${PSQL[@]}
     rm $ts.adiff
     ${PSQL[@]} -qAtc "insert into adiff_tracker_ts (ts) values ($ts);"
     sleep 10

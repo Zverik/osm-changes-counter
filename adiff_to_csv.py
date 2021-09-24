@@ -106,8 +106,8 @@ class TagComparator:
             return None
         return 'create' if not has_old else 'delete'
 
-    def reduce_tag_actions(*args) -> str:
-        actions = set([a for a in args if a])
+    def reduce_tag_actions(self, acts) -> str:
+        actions = set([a for a in acts if a])
         if not actions:
             return None
         if len(actions) == 1:
@@ -118,7 +118,7 @@ class TagComparator:
         result = []
         kinds = self.tag_filter.list_kinds(obj.tag)
         tobj = {kv.get('k'): kv.get('v') for kv in obj.findall('tag')}
-        told = {} if not old else {kv.get('k'): kv.get('v') for kv in old.findall('tag')}
+        told = {} if old is None else {kv.get('k'): kv.get('v') for kv in old.findall('tag')}
         for kind, tags in kinds.items():
             klist = []
             for tag in tags:
@@ -127,7 +127,7 @@ class TagComparator:
                     klist.append(self.is_new_tag_action(kv[0], kv[1], tobj, told))
                 else:
                     klist.append(self.get_tag_action(tag, tobj, told))
-            result.append((kind, self.reduce_tag_actions(*klist)))
+            result.append((kind, self.reduce_tag_actions(klist)))
         return [r for r in result if r[1]]
 
 
@@ -150,13 +150,16 @@ def find_way_in_another_modified(way, adiff, is_created: bool):
     """
     if way.tag != 'way':
         return None
+    candidate = None
     for action in adiff.findall('action'):
         if action.get('type') != 'modify':
             continue
         old_way = action.find('old' if is_created else 'new')[0]
-        if old_way.tag == 'way' and is_way_inside(way, old_way):
-            return old_way
-    return None
+        if (old_way.tag == 'way' and old_way.get('id') != way.get('id') and
+                is_way_inside(way, old_way)):
+            if candidate is None or candidate.get('version') < old_way.get('version'):
+                candidate = old_way
+    return candidate
 
 
 def write_header(output, table=None):
@@ -170,17 +173,18 @@ def write_header(output, table=None):
             output.write(f"    {c[0]} {c[1]}{comma}\n")
         output.write(");\n")
         # Copying into a temporary table
-        output.write(f"create temporary table tmp_{table} (like {table} including defaults)"
-                     " on commit drop;\n")
+        output.write(f"create table tmp_{table} (like {table} including defaults);\n")
         output.write(f"copy tmp_{table} ({col_names}) from stdin (format csv);\n")
 
 
 def write_footer(output, table=None):
     if table:
-        output.write(f"\n\\.\n\ninsert into {table} select * from tmp_{table} "
+        output.write("\\.\n\n")
+        output.write(f"insert into {table} select * from tmp_{table} "
                      "on conflict do nothing;\n")
+        output.write(f"drop table tmp_{table};\n")
         output.write(f"create unique index if not exists idx_{table} on {table} "
-                     "(osm_id, version, kind);")
+                     "(osm_id, version, kind);\n")
 
 
 def process_single_action(action, adiff, regions=None, tag_filter=None):
@@ -197,7 +201,7 @@ def process_single_action(action, adiff, regions=None, tag_filter=None):
     data = init_data_from_object(obj, old)
     if not data:
         return
-    if regions and not regions.is_empty():
+    if regions and not regions.is_empty:
         data['region'] = regions.find(data['lon'], data['lat'])
         if not data['region']:
             return
@@ -240,7 +244,7 @@ if __name__ == '__main__':
                         help='File with a list of tags to watch')
     parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
                         help='CSV file with names and wkb geometry for regions to filter')
-    parser.add_argument('-t', '--table',
+    parser.add_argument('-p', '--table',
                         help='Instead of CSV, print SQL for importing into this psql table')
     options = parser.parse_args()
 

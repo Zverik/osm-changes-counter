@@ -17,23 +17,28 @@ class InitHandler(osmium.SimpleHandler):
         self.tag_filter = tag_filter
         self.region_filter = region_filter
 
+    def tags_to_dict(self, obj):
+        return {tag.k: tag.v for tag in obj.tags}
+
     def node(self, n):
-        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('node', n.tags):
+        tags = self.tags_to_dict(n)
+        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('node', tags):
             return
         if (not self.region_filter.is_empty and
                 not self.region_filter.find(n.location.lon, n.location.lat)):
             return
-        self.db.save_object(StoredObject('node', n.id, n.version, n.tags))
+        self.db.save_object(StoredObject('node', n.id, n.version, tags))
         # Save its location
         self.db.update_locations([(n.id, n.location.lat, n.location.lon)])
 
     def way(self, w):
         if len(w.nodes) < 2:
             return
-        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('way', w.tags):
+        tags = self.tags_to_dict(w)
+        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('way', tags):
             return
         self.db.save_object(StoredObject(
-            'way', w.id, w.version, w.tags, [n.ref for n in w.nodes]
+            'way', w.id, w.version, tags, [n.ref for n in w.nodes]
         ))
         # Also store node locations
         self.db.update_locations([(n.ref, n.location.lat, n.location.lon) for n in w.nodes])
@@ -175,13 +180,15 @@ class AdiffBuilder:
             self.add_locations(new, locations)
         return new
 
-    def store_way_locations(self, obj):
-        if obj.tag != 'way':
-            return
+    def store_locations(self, obj):
         nodes = []
-        for nd in obj.findall('nd'):
-            if nd.get('lat'):
-                nodes.append((nd.get('ref'), float(nd.get('lat')), float(nd.get('lon'))))
+        if obj.tag == 'node':
+            if obj.get('lat'):
+                nodes.append((obj.get('id'), float(obj.get('lat')), float(obj.get('lon'))))
+        elif obj.tag == 'way':
+            for nd in obj.findall('nd'):
+                if nd.get('lat'):
+                    nodes.append((nd.get('ref'), float(nd.get('lat')), float(nd.get('lon'))))
         self.db.update_locations(nodes)
 
     def stored_to_xml(self, parent, stored):
@@ -206,8 +213,6 @@ class AdiffBuilder:
             return None
         obj = etree.fromstring(resp.content)[0]
         tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
-        if osm_type != 'way':
-            return StoredObject(osm_type, osm_id, version, tags)
         node_ids = self.get_node_ids(obj)
         return StoredObject(osm_type, osm_id, version, tags, node_ids)
 
@@ -259,9 +264,8 @@ class AdiffBuilder:
                 # Simply copy as-is, adding locations to way nodes
                 na = etree.SubElement(root, 'action', type='create')
                 new = self.copy_with_locations(na, obj, locations)
-                if obj.tag == 'way':
-                    # Store locations to db
-                    self.store_way_locations(new)
+                # Store locations to db
+                self.store_locations(new)
                 # Add object to our database to monitor its changes
                 self.db.save_object(StoredObject(
                     obj.tag, obj.get('id'), obj.get('version'), tags,
@@ -284,7 +288,7 @@ class AdiffBuilder:
                     self.stored_to_xml(na_old, old)
                     # Add locations to old nodes and save them to db if needed
                     self.add_locations(na_old[0], locations)
-                    self.store_way_locations(na_old[0])
+                    self.store_locations(na_old[0])
                     # Note that even for ways there are no tags and no referenced nodes
                     self.copy_with_locations(na_new, obj, locations)
                     # Register deletion as zero tags to our database
@@ -297,9 +301,8 @@ class AdiffBuilder:
                             obj.tag, obj.get('id'), int(obj.get('version')) - 1)
                     # First copy new version with locations
                     new = self.copy_with_locations(na_new, obj, locations)
-                    if obj.tag == 'way':
-                        # Store locations to db
-                        self.store_way_locations(new)
+                    # Store locations to db
+                    self.store_locations(new)
                     # Restore old version (locations already in the db)
                     if old:
                         self.stored_to_xml(na_old, old)
