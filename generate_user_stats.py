@@ -71,6 +71,9 @@ if __name__ == '__main__':
         w = csv.DictWriter(options.output, columns)
         w.writeheader()
         for uid, edits in byuser.items():
+            if users:
+                if uid not in users and usernames[uid] not in users:
+                    continue
             row = {'user': usernames[uid]}
             for k, v in edits.items():
                 if k[0] not in row:

@@ -209,7 +209,18 @@ def write_header(output, table=None):
             comma = '' if c == COLUMNS[-1] else ','
             output.write(f"    {c[0]} {c[1]}{comma}\n")
         output.write(");\n")
-        output.write(f"copy {table} ({col_names}) from stdin (format csv);\n")
+        # Copying into a temporary table
+        output.write(f"create temporary table tmp_{table} (like {table} including defaults)"
+                     " on commit drop;\n")
+        output.write(f"copy tmp_{table} ({col_names}) from stdin (format csv);\n")
+
+
+def write_footer(output, table=None):
+    if table:
+        output.write(f"\n\\.\n\ninsert into {table} select * from tmp_{table} "
+                     "on conflict do nothing;\n")
+        output.write(f"create unique index if not exists idx_{table} on {table} "
+                     "(osm_id, version, kind);")
 
 
 def process_single_action(action, adiff, regions=None):
@@ -285,3 +296,5 @@ if __name__ == '__main__':
                 write_header(options.output, options.table)
                 wrote_header = True
             writer.writerow(row)
+    if wrote_header:
+        write_footer(options.output, options.table)
