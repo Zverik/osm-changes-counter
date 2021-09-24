@@ -2,3 +2,5 @@ shapely
 lxml
 pyproj
 requests
+psycopg2
+osmium

@@ -1,0 +1,358 @@
+import argparse
+import psycopg2
+import osmium
+import requests
+from lxml import etree
+from osc_db import OscDatabase, StoredObject
+from filters import TagFilter, RegionFilter
+
+
+OSM_API = 'https://api.openstreetmap.org/api/0.6'
+
+
+class InitHandler(osmium.SimpleHandler):
+    def __init__(self, db, tag_filter, region_filter):
+        super().__init__()
+        self.db = db
+        self.tag_filter = tag_filter
+        self.region_filter = region_filter
+
+    def node(self, n):
+        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('node', n.tags):
+            return
+        if (not self.region_filter.is_empty and
+                not self.region_filter.find(n.location.lon, n.location.lat)):
+            return
+        self.db.save_object(StoredObject('node', n.id, n.version, n.tags))
+        # Save its location
+        self.db.update_locations([(n.id, n.location.lat, n.location.lon)])
+
+    def way(self, w):
+        if len(w.nodes) < 2:
+            return
+        if not self.tag_filter.is_empty and not self.tag_filter.get_kinds('way', w.tags):
+            return
+        self.db.save_object(StoredObject(
+            'way', w.id, w.version, w.tags, [n.ref for n in w.nodes]
+        ))
+        # Also store node locations
+        self.db.update_locations([(n.ref, n.location.lat, n.location.lon) for n in w.nodes])
+
+
+class Bounds:
+    def __init__(self):
+        self.minlon = 1000
+        self.maxlon = -1000
+        self.minlat = 1000
+        self.maxlat = -1000
+
+    def extend(self, lat, lon):
+        if lat < self.minlat:
+            self.minlat = lat
+        if lat > self.maxlat:
+            self.maxlat = lat
+        if lon < self.minlon:
+            self.minlon = lon
+        if lon > self.maxlon:
+            self.maxlon = lon
+
+    @property
+    def is_empty(self):
+        return self.minlon > 360
+
+    def to_xml(self):
+        if self.is_empty:
+            raise ValueError('Non-initialized Bounds object!')
+        return etree.Element(
+            'bounds', minlat=str(self.minlat), minlon=str(self.minlon),
+            maxlat=str(self.maxlat), maxlon=str(self.maxlon))
+
+
+class AdiffBuilder:
+    def __init__(self, db, tag_filter, region_filter):
+        self.db = db
+        self.tag_filter = tag_filter
+        self.region_filter = region_filter
+
+    def scan_node_locations(self, osc) -> dict:
+        """Searches for nodes and returns dict of node_id -> (lat, lon)."""
+        locs = {}
+        for action in osc:
+            for node in action.findall('node'):
+                node_id = node.get('id')
+                if node.get('lat'):
+                    locs[node_id] = float(node.get('lat')), float(node.get('lon'))
+        return locs
+
+    def get_node_ids(self, obj):
+        if obj.tag == 'way':
+            return [nd.get('ref') for nd in obj.findall('nd')]
+        if obj.tag == 'relation':
+            return [nd.get('ref') for nd in obj.findall('member') if nd.get('type') == 'node']
+        return None
+
+    def get_representative_point(self, obj, locations) -> tuple:
+        """Returns (lat, lon) for an xml object of way or node."""
+        if obj.tag == 'node':
+            if obj.get('lat'):
+                return float(obj.get('lat')), float(obj.get('lon'))
+            # Deleted node, look up coordinates in the database
+            node_id = obj.get('id')
+            loc = self.db.get_locations([node_id])
+            return None if not loc else loc[node_id]
+        else:
+            node_ids = self.get_node_ids(obj)
+            if len(node_ids) < 2:
+                return None
+            # First look up nodes in the same osmChange
+            loc = {k: locations[k] for k in node_ids if k in locations}
+            if not loc:
+                # Not found, e.g. just a tag change. Look up in the database
+                loc = self.db.get_locations(node_ids)
+            # We don't need to download a node from OSM API in case of failure,
+            # since if the object is not in the database, it's not relevant.
+            return None if not loc else loc[list(loc.keys())[0]]
+
+    def get_locations_from_everywhere(self, node_ids, locations):
+        loc = {k: locations[k] for k in node_ids if k in locations}
+        if len(loc) < len(node_ids):
+            loc.update(self.db.get_locations(set(node_ids) - loc.keys()))
+        if len(loc) < len(node_ids):
+            loc.update(self.download_node_locations(set(node_ids) - loc.keys()))
+        return loc
+
+    def add_locations(self, obj, locations):
+        if obj.tag == 'node':
+            return
+        bounds = Bounds()
+        node_ids = self.get_node_ids(obj)
+        loc = self.get_locations_from_everywhere(node_ids, locations)
+        if obj.tag == 'way':
+            # Add locations to nodes
+            for nd in obj.findall('nd'):
+                if not nd.get('lat'):
+                    nd_id = nd.get('ref')
+                    if nd_id in loc:
+                        nd.set('lat', str(loc[nd_id][0]))
+                        nd.set('lon', str(loc[nd_id][1]))
+                        bounds.extend(*loc[nd_id])
+
+        if obj.tag == 'relation':
+            # Set coordinates only for nodes
+            for nd in obj.findall('member'):
+                if nd.get('type') == 'node' and not nd.get('lat'):
+                    nd_id = nd.get('ref')
+                    if nd_id in loc:
+                        nd.set('lat', str(loc[nd_id][0]))
+                        nd.set('lon', str(loc[nd_id][1]))
+                        bounds.extend(*loc[nd_id])
+
+        if not bounds.is_empty:
+            obj.append(bounds.to_xml())
+
+    def copy_with_locations(self, parent, obj, locations):
+        new = etree.SubElement(parent, obj.tag)
+        for k, v in obj.items():
+            new.set(k, v)
+        for tag in obj.findall('tag'):
+            tag_node = etree.SubElement(new, 'tag')
+            tag_node.set('k', tag.get('k'))
+            tag_node.set('v', tag.get('v'))
+
+        if obj.tag == 'way':
+            # Copy nodes
+            for child in obj.findall('nd'):
+                etree.SubElement(new, 'nd', ref=child.get('ref'))
+
+        if obj.tag == 'relation':
+            # Copy members
+            for child in obj.findall('member'):
+                etree.SubElement(
+                    new, 'member', type=child.get('type'),
+                    ref=child.get('ref'), role=child.get('role')
+                )
+        if obj.tag != 'node':
+            self.add_locations(new, locations)
+        return new
+
+    def store_way_locations(self, obj):
+        if obj.tag != 'way':
+            return
+        nodes = []
+        for nd in obj.findall('nd'):
+            if nd.get('lat'):
+                nodes.append((nd.get('ref'), float(nd.get('lat')), float(nd.get('lon'))))
+        self.db.update_locations(nodes)
+
+    def stored_to_xml(self, parent, stored):
+        obj = etree.SubElement(
+            parent, stored.typ,
+            id=str(stored.osm_id), version=str(stored.version)
+        )
+        for k, v in stored.tags.items():
+            etree.SubElement(obj, 'tag', k=k, v=v)
+        if stored.nodes:
+            loc = self.db.get_locations(stored.nodes)
+            for node_id in stored.nodes:
+                nd = etree.SubElement(obj, 'nd', ref=str(node_id))
+                if node_id in loc:
+                    nd.set('lat', str(loc[node_id][0]))
+                    nd.set('lon', str(loc[node_id][1]))
+        return obj
+
+    def download_version(self, osm_type, osm_id, version):
+        resp = requests.get(f'{OSM_API}/{osm_type}/{osm_id}/{version}')
+        if resp.status_code != 200:
+            return None
+        obj = etree.fromstring(resp.content)[0]
+        tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
+        if osm_type != 'way':
+            return StoredObject(osm_type, osm_id, version, tags)
+        node_ids = self.get_node_ids(obj)
+        return StoredObject(osm_type, osm_id, version, tags, node_ids)
+
+    def download_node_locations(self, node_ids):
+        """
+        Downloads locations from OSM API.
+        Returns a dict of node_id -> (lat, lon).
+        """
+        resp = requests.get(f'{OSM_API}/nodes', {'nodes': ",".join(node_ids)})
+        if resp.status_code != 200:
+            raise KeyError(f'Missing node reference: {resp.text}. Req: {node_ids}.')
+        loc = {}
+        xmlresp = etree.fromstring(resp.content)
+        for obj in xmlresp.findall('node'):
+            if obj.get('lat'):
+                loc[obj.get('id')] = (float(obj.get('lat')), float(obj.get('lon')))
+        # Now we need to test for deleted nodes
+        for node_id in node_ids:
+            if str(node_id) not in loc:
+                resp = requests.get(f'{OSM_API}/node/{node_id}/history')
+                if resp.status_code != 200:
+                    raise IOError(f'Failed to retrieve history for node {node_id}.')
+                xmlresp = etree.fromstring(resp.content)
+                for obj in reversed(xmlresp.findall('node')):
+                    if obj.get('lat'):
+                        loc[obj.get('id')] = (float(obj.get('lat')), float(obj.get('lon')))
+                        break
+        return loc
+
+    def wrong_tags(self, obj, tags):
+        return not self.tag_filter.is_empty and not self.tag_filter.get_kinds(obj.tag, tags)
+
+    def process_osc(self, filename, adiff):
+        osc = etree.parse(filename).getroot()
+        locations = self.scan_node_locations(osc)
+        root = etree.Element('osm', version='0.6', generator='OSC to ADIFF')
+        for action in osc:
+            obj = action[0]
+            if not self.region_filter.is_empty:
+                point = self.get_representative_point(obj, locations)
+                if not point or not self.region_filter.find(point[1], point[0]):
+                    # No coords or coord is not in a region
+                    continue
+            tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
+            if action.tag == 'create':
+                # No tag history, just check what we have
+                if self.wrong_tags(obj, tags):
+                    continue
+                # Simply copy as-is, adding locations to way nodes
+                na = etree.SubElement(root, 'action', type='create')
+                new = self.copy_with_locations(na, obj, locations)
+                if obj.tag == 'way':
+                    # Store locations to db
+                    self.store_way_locations(new)
+                # Add object to our database to monitor its changes
+                self.db.save_object(StoredObject(
+                    obj.tag, obj.get('id'), obj.get('version'), tags,
+                    self.get_node_ids(obj)
+                ))
+            else:
+                old = db.read_object(obj.tag, obj.get('id'))
+                # Skipping if there is no history (meaning no relevant tags in old versions)
+                # and no relevant tags in the new version.
+                if not old and self.wrong_tags(obj, tags):
+                    continue
+                if action.tag == 'delete' and not old:
+                    # Skip deletions of things we don't have history on
+                    continue
+                na = etree.SubElement(root, 'action', type=action.tag)
+                na_old = etree.SubElement(na, 'old')
+                na_new = etree.SubElement(na, 'new')
+                if action.tag == 'delete':
+                    # Restore old version
+                    self.stored_to_xml(na_old, old)
+                    # Add locations to old nodes and save them to db if needed
+                    self.add_locations(na_old[0], locations)
+                    self.store_way_locations(na_old[0])
+                    # Note that even for ways there are no tags and no referenced nodes
+                    self.copy_with_locations(na_new, obj, locations)
+                    # Register deletion as zero tags to our database
+                    self.db.save_object(StoredObject(
+                        obj.tag, obj.get('id'), obj.get('version'), {}
+                    ))
+                elif action.tag == 'modify':
+                    if not old:
+                        old = self.download_version(
+                            obj.tag, obj.get('id'), int(obj.get('version')) - 1)
+                    # First copy new version with locations
+                    new = self.copy_with_locations(na_new, obj, locations)
+                    if obj.tag == 'way':
+                        # Store locations to db
+                        self.store_way_locations(new)
+                    # Restore old version (locations already in the db)
+                    if old:
+                        self.stored_to_xml(na_old, old)
+                        self.add_locations(na_old[0], locations)
+                    self.db.save_object(StoredObject(
+                        obj.tag, obj.get('id'), obj.get('version'), tags,
+                        self.get_node_ids(obj)
+                    ))
+                else:
+                    raise ValueError(f'Unknown osc action: {action.tag}')
+        tree = etree.ElementTree(root)
+        tree.write(adiff, pretty_print=True, encoding='utf-8')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Converts osmChange to Augmented Diffs based on tag and region filters.')
+    parser.add_argument('action', choices=['init', 'process'])
+    parser.add_argument('input', help='Source file, either a pbf or an osmChange')
+    parser.add_argument('-a', '--adiff', type=argparse.FileType('wb'),
+                        help='Augmented diff file to produce')
+    parser.add_argument('-t', '--tags', type=argparse.FileType('r'),
+                        help='File with a list of tags to watch')
+    parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
+                        help='CSV file with names and wkb geometry for regions to filter')
+    psql = parser.add_argument_group('PostgreSQL connection')
+    psql.add_argument('-d', '--database', required=True, help='PSQL database name')
+    psql.add_argument('-H', '--dbhost', default='localhost',
+                      help='PSQL hostname, default is localhost')
+    psql.add_argument('-P', '--dbport', type=int, default=5432,
+                      help='PSQL port, default is 5432')
+    psql.add_argument('-U', '--dbuser', help='PSQL user')
+    psql.add_argument('-W', '--dbpass', help='PSQL password')
+    options = parser.parse_args()
+
+    conn = psycopg2.connect(
+        dbname=options.database,
+        user=options.dbuser,
+        password=options.dbpass,
+        host=options.dbhost,
+        port=options.dbport,
+    )
+    tags = TagFilter(options.tags)
+    regions = RegionFilter(options.regions)
+    db = OscDatabase(conn, tags)
+
+    if options.action == 'init':
+        db.create_tables()
+        handler = InitHandler(db, tags, regions)
+        handler.apply_file(options.input, locations=True)
+    elif options.action == 'process':
+        a = AdiffBuilder(db, tags, regions)
+        a.process_osc(options.input, options.adiff)
+    else:
+        raise ValueError(f'Wrong action: {options.action}')
+    db.close()

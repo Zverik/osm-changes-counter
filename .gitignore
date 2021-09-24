@@ -4,3 +4,6 @@ u*.csv
 *.gz
 venv/
 __pycache__/
+*.osc
+[ansu]*.csv
+*.pbf

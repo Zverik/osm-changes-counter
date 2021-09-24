@@ -2,11 +2,10 @@
 import argparse
 import sys
 import csv
+from filters import TagFilter, RegionFilter
 from lxml import etree
 from pyproj import Geod
-from shapely import wkb
-from shapely.geometry import Point, LineString
-from shapely.strtree import STRtree
+from shapely.geometry import LineString
 
 
 COLUMNS = [
@@ -35,33 +34,6 @@ COLUMNS = [
     # For ways, length in meters
     ('length', 'integer'),
 ]
-
-
-class Regions:
-    def __init__(self, fileobj=None):
-        self.tree = None
-        self.region_map = {}
-        if fileobj:
-            self.load(fileobj)
-
-    def is_empty(self):
-        return self.tree is None or len(self.region_map) == 0
-
-    def load(self, fileobj):
-        regions = []
-        csv.field_size_limit(1000000)
-        for row in csv.reader(fileobj):
-            regions.append((row[0], wkb.loads(bytes.fromhex(row[1]))))
-        self.tree = STRtree([r[1] for r in regions])
-        self.region_map = {id(r[1]): r[0] for r in regions}
-
-    def find(self, lon, lat):
-        if not self.tree:
-            return None
-        pt = Point(lon, lat)
-        results = self.tree.query(pt)
-        results = [r for r in results if r.contains(pt)]
-        return None if not results else self.region_map[id(results[0])]
 
 
 def get_float_attr(attr, obj, backup=None):
@@ -111,64 +83,52 @@ def init_data_from_object(obj, backup=None):
     return result
 
 
-def get_tag_value(tag, obj=None):
-    if obj is None:
-        return None
-    tags = [t for t in obj.findall('tag') if t.get('k') == tag]
-    return None if not tags else tags[0].get('v')
+class TagComparator:
+    def __init__(self, tag_filter):
+        self.tag_filter = tag_filter
 
-
-def get_tag_action(tag, obj, old=None) -> str:
-    new_value = get_tag_value(tag, obj)
-    old_value = get_tag_value(tag, old)
-    if new_value == old_value:
-        return None
-    if new_value:
-        return 'create' if not old_value else 'modify'
-    else:
-        return 'delete'
-
-
-def is_new_tag_action(k, v, obj, old=None) -> str:
-    has_new = get_tag_value(k, obj) == v
-    has_old = get_tag_value(k, old) == v
-    if has_new == has_old:
-        return None
-    return 'create' if not has_old else 'delete'
-
-
-def reduce_tag_actions(*args) -> str:
-    actions = set([a for a in args if a])
-    if not actions:
-        return None
-    if len(actions) == 1:
-        return list(actions)[0]
-    return 'modify'
-
-
-def get_kinds(obj, old=None):
-    result = []  # list of (kind, action)
-    if obj.tag == 'node':
-        result.append(('traffic_calming', get_tag_action('traffic_calming', obj, old)))
-        ta = is_new_tag_action('highway', 'crossing', obj, old)
-        if ta:
-            result.append(('crossing', ta))
+    def get_tag_action(self, tag, obj, old=None) -> str:
+        new_value = obj.get(tag)
+        old_value = old.get(tag)
+        if new_value == old_value:
+            return None
+        if new_value:
+            return 'create' if not old_value else 'modify'
         else:
-            result.append(('crossing_island', get_tag_action('crossing:island', obj, old)))
-        result.append(('stop', is_new_tag_action('highway', 'bus_stop', obj, old)))
-    elif obj.tag == 'way':
-        result.append(('maxspeed', reduce_tag_actions(
-            get_tag_action('maxspeed', obj, old),
-            get_tag_action('maxspeed:backward', obj, old),
-            get_tag_action('maxspeed:forward', obj, old),
-        )))
-        result.append(('lanes', reduce_tag_actions(
-            get_tag_action('lanes', obj, old),
-            get_tag_action('lanes:backward', obj, old),
-            get_tag_action('lanes:forward', obj, old),
-        )))
-        result.append(('lit', get_tag_action('lit', obj, old)))
-    return [r for r in result if r[1]]
+            return 'delete'
+
+    def is_new_tag_action(self, k, v, obj, old=None) -> str:
+        has_new = obj.get(k) == v
+        has_old = old.get(k) == v
+        if has_new == has_old:
+            if has_old and obj != old:
+                return 'modify'
+            return None
+        return 'create' if not has_old else 'delete'
+
+    def reduce_tag_actions(*args) -> str:
+        actions = set([a for a in args if a])
+        if not actions:
+            return None
+        if len(actions) == 1:
+            return list(actions)[0]
+        return 'modify'
+
+    def apply_kinds(self, obj, old=None):
+        result = []
+        kinds = self.tag_filter.list_kinds(obj.tag)
+        tobj = {kv.get('k'): kv.get('v') for kv in obj.findall('tag')}
+        told = {} if not old else {kv.get('k'): kv.get('v') for kv in old.findall('tag')}
+        for kind, tags in kinds.items():
+            klist = []
+            for tag in tags:
+                if '=' in tag:
+                    kv = tag.split('=')
+                    klist.append(self.is_new_tag_action(kv[0], kv[1], tobj, told))
+                else:
+                    klist.append(self.get_tag_action(tag, tobj, told))
+            result.append((kind, self.reduce_tag_actions(*klist)))
+        return [r for r in result if r[1]]
 
 
 def is_way_inside(way, another):
@@ -223,7 +183,7 @@ def write_footer(output, table=None):
                      "(osm_id, version, kind);")
 
 
-def process_single_action(action, adiff, regions=None):
+def process_single_action(action, adiff, regions=None, tag_filter=None):
     """
     Processes a single action in an augmented diff.
     Returns a list of rows to print.
@@ -261,7 +221,8 @@ def process_single_action(action, adiff, regions=None):
                 obj = ancestor  # just for comparing tags
     data['obj_action'] = atype
     # Find tagging differences and write them out.
-    kinds = get_kinds(obj, old)
+    tag_comp = TagComparator(tag_filter)
+    kinds = tag_comp.apply_kinds(obj, old)
     for k in kinds:
         data['action'] = k[1]
         data['kind'] = k[0]
@@ -275,6 +236,8 @@ if __name__ == '__main__':
                         help='Augmented diff file')
     parser.add_argument('-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
                         help='Output CSV or SQL file')
+    parser.add_argument('-t', '--tags', type=argparse.FileType('r'),
+                        help='File with a list of tags to watch')
     parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
                         help='CSV file with names and wkb geometry for regions to filter')
     parser.add_argument('-t', '--table',
@@ -282,7 +245,8 @@ if __name__ == '__main__':
     options = parser.parse_args()
 
     # Read regions and the augmented diff.
-    regions = Regions(options.regions)
+    tags = TagFilter(options.tags)
+    regions = RegionFilter(options.regions)
     adiff = etree.parse(options.adiff).getroot()
 
     # Prepare writer and write the header.
@@ -291,7 +255,7 @@ if __name__ == '__main__':
 
     # Iterate over every action (each of which has just one object).
     for action in adiff.findall('action'):
-        for row in process_single_action(action, adiff, regions):
+        for row in process_single_action(action, adiff, regions, tags):
             if not wrote_header:
                 write_header(options.output, options.table)
                 wrote_header = True
