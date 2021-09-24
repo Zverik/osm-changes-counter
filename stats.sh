@@ -4,5 +4,5 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PSQL=( psql "$1" -v ON_ERROR_STOP=1 )
 PYTHON=venv/bin/python
-${PSQL[@]} $1 -c "copy adiff_tracker to stdout (format csv, header)" \
+${PSQL[@]} $1 -c "copy osc_tracker to stdout (format csv, header)" \
   | $PYTHON generate_user_stats.py 1> "${2-&1}"
