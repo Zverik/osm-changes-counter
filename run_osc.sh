@@ -21,6 +21,6 @@ for ts in $(seq $NEXT_SEQ $SEQ); do
     rm $ts.osc.gz
     rm $ts.adiff
     ${PSQL[@]} -qAtc "insert into osc_tracker_ts (ts) values ($ts);"
-    sleep 10
+    sleep 5
 done
 ${PSQL[@]} -qAtc "delete from osc_tracker_ts where ts < (select max(ts) from osc_tracker_ts);"

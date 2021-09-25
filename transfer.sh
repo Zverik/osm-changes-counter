@@ -3,7 +3,7 @@
 if [ "$1" == "dump" ]; then
   pg_dump "$2" -t 'osc*' --no-acl --no-owner --clean --if-exists | gzip > "$3"
 elif [ "$1" == "restore" ]; then
-  gzip -dc "$3" | psql "$2" -v ON_ERROR_STOP=1
+  gzip -dc "$3" | psql "$2"
 else
   echo "Wrong command: $1"
   exit 3
