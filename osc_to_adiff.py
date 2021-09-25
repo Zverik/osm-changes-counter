@@ -317,27 +317,6 @@ class AdiffBuilder:
         tree.write(adiff, pretty_print=True, encoding='utf-8')
 
 
-def connect_to_psql(options):
-    if not options.dbuser and not options.dbpass:
-        # Due to auth issues use a dsn string
-        pgargs = {'dbname': options.database}
-        if options.dbhost:
-            pgargs['host'] = options.dbhost
-        if options.dbport:
-            pgargs['port'] = options.dbport
-        pg_dsn = ' '.join([f'{k}={v}' for k, v in pgargs.items()])
-        conn = psycopg2.connect(pg_dsn)
-    else:
-        conn = psycopg2.connect(
-            dbname=options.database,
-            user=options.dbuser,
-            password=options.dbpass,
-            host=options.dbhost,
-            port=options.dbport,
-        )
-    return conn
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Converts osmChange to Augmented Diffs based on tag and region filters.')
@@ -357,7 +336,13 @@ if __name__ == '__main__':
     psql.add_argument('-W', '--dbpass', help='PSQL password')
     options = parser.parse_args()
 
-    conn = connect_to_psql(options)
+    conn = psycopg2.connect(
+        dbname=options.database,
+        user=options.dbuser,
+        password=options.dbpass,
+        host=options.dbhost,
+        port=options.dbport,
+    )
     tags = TagFilter(options.tags)
     regions = RegionFilter(options.regions)
     db = OscDatabase(conn, tags)
