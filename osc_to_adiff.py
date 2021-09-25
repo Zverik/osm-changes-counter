@@ -100,27 +100,26 @@ class AdiffBuilder:
             return [nd.get('ref') for nd in obj.findall('member') if nd.get('type') == 'node']
         return None
 
-    def get_representative_point(self, obj, locations) -> tuple:
+    def get_representative_point(self, obj, locations, download=False) -> tuple:
         """Returns (lat, lon) for an xml object of way or node."""
         if obj.tag == 'node':
             if obj.get('lat'):
                 return float(obj.get('lat')), float(obj.get('lon'))
             # Deleted node, look up coordinates in the database
-            node_id = obj.get('id')
-            loc = self.db.get_locations([node_id])
-            return None if not loc else loc[node_id]
+            node_ids = [obj.get('id')]
         else:
-            node_ids = self.get_node_ids(obj)
-            if len(node_ids) < 2:
-                return None
-            # First look up nodes in the same osmChange
-            loc = {k: locations[k] for k in node_ids if k in locations}
-            if not loc:
-                # Not found, e.g. just a tag change. Look up in the database
-                loc = self.db.get_locations(node_ids)
-            # We don't need to download a node from OSM API in case of failure,
-            # since if the object is not in the database, it's not relevant.
-            return None if not loc else loc[list(loc.keys())[0]]
+            node_ids = set(self.get_node_ids(obj))
+        if not node_ids:
+            return None
+
+        # First look up nodes in the same osmChange
+        loc = {k: locations[k] for k in node_ids if k in locations}
+        if not loc:
+            # Not found, e.g. just a tag change. Look up in the database
+            loc = self.db.get_locations(node_ids)
+        if not loc and download:
+            loc = self.download_node_locations(list(node_ids)[:1])
+        return None if not loc else loc[list(loc.keys())[0]]
 
     def get_locations_from_everywhere(self, node_ids, locations):
         id_set = set(node_ids)
@@ -269,17 +268,23 @@ class AdiffBuilder:
         for _, action in etree.iterparse(fileobj, events=['end'],
                                          tag=['create', 'modify', 'delete']):
             for obj in action:
-                logging.debug('Processing action %s for object %s %s v%s',
-                              action.tag, obj.tag, obj.get('id'), obj.get('version'))
+                obj_desc = f'Action {action.tag} {obj.tag} {obj.get("id")} v{obj.get("version")}'
+                tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
                 if not self.region_filter.is_empty:
-                    point = self.get_representative_point(obj, locations)
+                    # If tags are right, download a representative node from OSM API
+                    point = self.get_representative_point(
+                        obj, locations, not self.wrong_tags(obj, tags))
                     if not point or not self.region_filter.find(point[1], point[0]):
                         # No coords or coord is not in a region
+                        coord_str = '(null)' if not point else f'({point[1]}, {point[0]})'
+                        logging.debug('%s: %s outside of regions', obj_desc, coord_str)
+                        obj.clear()
                         continue
-                tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
                 if action.tag == 'create':
                     # No tag history, just check what we have
                     if self.wrong_tags(obj, tags):
+                        logging.debug('%s: no relevant tags', obj_desc)
+                        obj.clear()
                         continue
                     # Simply copy as-is, adding locations to way nodes
                     na = etree.SubElement(root, 'action', type='create')
@@ -296,9 +301,13 @@ class AdiffBuilder:
                     if not old and self.wrong_tags(obj, tags):
                         # Skipping if there is no history (meaning no relevant tags in old versions)
                         # and no relevant tags in the new version.
+                        logging.debug('%s: no history and no relevant tags', obj_desc)
+                        obj.clear()
                         continue
                     if action.tag == 'delete' and not old:
                         # Skip deletions of things we don't have history on
+                        logging.debug('%s: no history, meaning no relevant tags', obj_desc)
+                        obj.clear()
                         continue
                     na = etree.SubElement(root, 'action', type=action.tag)
                     na_old = etree.SubElement(na, 'old')
@@ -333,6 +342,7 @@ class AdiffBuilder:
                         ))
                     else:
                         raise ValueError(f'Unknown osc action: {action.tag}')
+                logging.debug('%s: written to augmented diff', obj_desc)
                 obj.clear()
             action.clear()
         fileobj.close()

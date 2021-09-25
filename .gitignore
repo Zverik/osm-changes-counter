@@ -7,3 +7,4 @@ __pycache__/
 *.osc
 [ansuo]*.csv
 *.pbf
+*.log

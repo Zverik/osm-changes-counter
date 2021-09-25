@@ -19,8 +19,10 @@ class TagFilter:
         for row in fileobj:
             parts = [k.lower() for k in row.strip().split()]
             if len(parts) > 1:
-                self.kinds[parts[0][0]][parts[-1]] = parts[1]
-                self.relevant_keys.add(parts[-1].split('=')[0])
+                kind = parts[1].split('+')[0]
+                tag = parts[-1].split('+')[0]
+                self.kinds[parts[0][0]][tag] = kind
+                self.relevant_keys.add(tag.split('=')[0])
 
     def get_kinds(self, typ, tags) -> set:
         """Receives a dict of tags and matches kinds to these."""
