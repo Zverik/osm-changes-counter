@@ -1,13 +1,13 @@
 n traffic_calming
 n crossing highway=crossing
-n crossing_island crossing:island
+n crossing_island crossing:island+highway=crossing
 n stop highway=bus_stop
 n stop highway=tram_stop
-w maxspeed maxspeed
-w maxspeed maxspeed:forward
-w maxspeed maxspeed:backward
-w maxspeed maxspeed:type
+w maxspeed maxspeed+highway
+w maxspeed maxspeed:forward+highway
+w maxspeed maxspeed:backward+highway
+w maxspeed maxspeed:type+highway
 w lanes lanes
 w lanes lanes:forward
 w lanes lanes:backward
-w lit
+w lit+highway

@@ -293,9 +293,9 @@ class AdiffBuilder:
                     ))
                 else:
                     old = db.read_object(obj.tag, obj.get('id'))
-                    # Skipping if there is no history (meaning no relevant tags in old versions)
-                    # and no relevant tags in the new version.
                     if not old and self.wrong_tags(obj, tags):
+                        # Skipping if there is no history (meaning no relevant tags in old versions)
+                        # and no relevant tags in the new version.
                         continue
                     if action.tag == 'delete' and not old:
                         # Skip deletions of things we don't have history on

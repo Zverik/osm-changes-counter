@@ -29,23 +29,30 @@ class TagFilter:
         kinds = self.kinds.get(typ[0].lower(), {})
         result = set()
         for tag, kind in kinds.items():
-            if '=' in tag:
-                kv = tag.split('=')
-                if tags.get(kv[0]) == kv[1]:
-                    result.add(kind)
-            else:
-                if tag in tags:
+            if '+' in tag:
+                # Check for context
+                parts = tag.split('+')
+                tag = parts[0]
+                kv = parts[1].split('=')
+                if kv[0] not in tags:
+                    continue
+                if len(kv) > 1 and tags[kv[0]] != kv[1]:
+                    continue
+            # Check for the actual tag
+            kv = tag.split('=')
+            if kv[0] in tags:
+                if len(kv) == 1 or tags[kv[0]] == kv[1]:
                     result.add(kind)
         return result
 
     def list_kinds(self, typ) -> dict:
-        """Returns a dict of kind -> [tag1, tag2, ...]."""
+        """Returns a dict of kind -> [(tag1, context1), (tag2,), ...]."""
         kinds = self.kinds.get(typ[0].lower(), {})
         result = {}
         for tag, kind in kinds.items():
             if kind not in result:
                 result[kind] = []
-            result[kind].append(tag)
+            result[kind].append(tag.split('+'))
         return result
 
     def filter_relevant(self, tags) -> dict:

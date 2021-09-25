@@ -122,11 +122,19 @@ class TagComparator:
         for kind, tags in kinds.items():
             klist = []
             for tag in tags:
-                if '=' in tag:
-                    kv = tag.split('=')
+                if len(tag) > 1:
+                    # Confirm context: at least new or old tags should have it
+                    kv = tag[1].split('=')
+                    if kv[0] not in tobj and kv[0] not in told:
+                        continue
+                    if len(kv) > 1 and tobj.get(kv[0]) != kv[1] and told.get(kv[0]) != kv[1]:
+                        continue
+                # Check for the tag change
+                if '=' in tag[0]:
+                    kv = tag[0].split('=')
                     klist.append(self.is_new_tag_action(kv[0], kv[1], tobj, told))
                 else:
-                    klist.append(self.get_tag_action(tag, tobj, told))
+                    klist.append(self.get_tag_action(tag[0], tobj, told))
             result.append((kind, self.reduce_tag_actions(klist)))
         return [r for r in result if r[1]]
 
@@ -151,14 +159,19 @@ def find_way_in_another_modified(way, adiff, is_created: bool):
     if way.tag != 'way':
         return None
     candidate = None
+    version = None
     for action in adiff.findall('action'):
         if action.get('type') != 'modify':
             continue
         old_way = action.find('old' if is_created else 'new')[0]
         if (old_way.tag == 'way' and old_way.get('id') != way.get('id') and
                 is_way_inside(way, old_way)):
-            if candidate is None or candidate.get('version') < old_way.get('version'):
-                candidate = old_way
+            if version is None or version < old_way.get('version'):
+                # For split, we compare "old" base way with the created way.
+                # For join, we compare deleted way with the "old" base way.
+                #   So that we can negate adding tags on base way
+                #   that were present on deleted way.
+                candidate = action.find('old')[0]
     return candidate
 
 
