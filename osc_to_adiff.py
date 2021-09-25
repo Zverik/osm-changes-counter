@@ -81,13 +81,16 @@ class AdiffBuilder:
         self.tag_filter = tag_filter
         self.region_filter = region_filter
 
-    def scan_node_locations(self, filename) -> dict:
+    def scan_node_locations(self, fileobj) -> dict:
         """Searches for nodes and returns dict of node_id -> (lat, lon)."""
         locs = {}
-        for _, node in etree.iterparse(filename, events=['end'], tag='node'):
-            node_id = node.get('id')
-            if node.get('lat'):
-                locs[node_id] = float(node.get('lat')), float(node.get('lon'))
+        for _, action in etree.iterparse(fileobj, events=['end'],
+                                         tag=['create', 'modify', 'delete']):
+            for node in action.findall('node'):
+                node_id = node.get('id')
+                if node.get('lat'):
+                    locs[node_id] = float(node.get('lat')), float(node.get('lon'))
+            action.clear()
         return locs
 
     def get_node_ids(self, obj):
@@ -257,10 +260,11 @@ class AdiffBuilder:
 
     def process_osc(self, filename, adiff):
         logging.info('Reading osmChange file %s', filename)
-        logging.debug('Scanning for node locations')
+        logging.info('Scanning for node locations')
         fileobj = gzip.open(filename)
         locations = self.scan_node_locations(fileobj)
         fileobj.seek(0)
+        logging.info('Iterating over actions')
         root = etree.Element('osm', version='0.6', generator='OSC to ADIFF')
         for _, action in etree.iterparse(fileobj, events=['end'],
                                          tag=['create', 'modify', 'delete']):
@@ -331,7 +335,7 @@ class AdiffBuilder:
                     raise ValueError(f'Unknown osc action: {action.tag}')
             action.clear()
         fileobj.close()
-        logging.debug('Done, writing the augmented diff')
+        logging.info('Done, writing the augmented diff')
         tree = etree.ElementTree(root)
         tree.write(adiff, pretty_print=True, encoding='utf-8')
 
