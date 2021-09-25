@@ -4,6 +4,7 @@ import osmium
 import requests
 import logging
 import gzip
+import itertools
 from lxml import etree
 from osc_db import OscDatabase, StoredObject
 from filters import TagFilter, RegionFilter
@@ -91,7 +92,28 @@ class AdiffBuilder:
                 if node.get('lat'):
                     locs[node_id] = float(node.get('lat')), float(node.get('lon'))
             action.clear()
+        fileobj.seek(0)
         return locs
+
+    def scan_relevant_ways_nodes(self, fileobj, locations) -> set:
+        """Looks for ways with no nodes in the database or in osc, and adds these to locations."""
+        if self.region_filter.is_empty:
+            return
+        node_ids = set()
+        for _, action in etree.iterparse(fileobj, events=['end'],
+                                         tag=['create', 'modify', 'delete']):
+            for way in action.findall('way'):
+                if not self.wrong_tags(way):
+                    point = self.get_representative_point(way, locations)
+                    if not point:
+                        ids = self.get_node_ids(way)
+                        if ids and node_ids.isdisjoint(set(ids)):
+                            node_ids.add(ids[0])
+            action.clear()
+        # Now download nodes from OSM API
+        loc = self.download_node_locations(node_ids)
+        locations.update(loc)
+        fileobj.seek(0)
 
     def get_node_ids(self, obj):
         if obj.tag == 'way':
@@ -217,10 +239,15 @@ class AdiffBuilder:
                       osm_type, osm_id, version, resp.status_code)
         if resp.status_code != 200:
             return None
-        obj = etree.fromstring(resp.content)[0]
-        tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
-        node_ids = self.get_node_ids(obj)
-        return StoredObject(osm_type, osm_id, version, tags, node_ids)
+        return etree.fromstring(resp.content)[0]
+
+    def iter_chunks(self, iterable, count):
+        it = iter(iterable)
+        while True:
+            chunk = tuple(itertools.islice(it, count))
+            if not chunk:
+                return
+            yield chunk
 
     def download_node_locations(self, node_ids):
         """
@@ -229,16 +256,18 @@ class AdiffBuilder:
         """
         if not node_ids:
             return {}
-        logging.debug('Requesting nodes from OSM API: %s', ', '.join(node_ids))
-        resp = requests.get(f'{OSM_API}/nodes', {'nodes': ",".join(node_ids)})
-        logging.debug('Queried OSM API for nodes, status code %s', resp.status_code)
-        if resp.status_code != 200:
-            raise KeyError(f'Missing node reference: {resp.text}. Req: {node_ids}.')
         loc = {}
-        xmlresp = etree.fromstring(resp.content)
-        for obj in xmlresp.findall('node'):
-            if obj.get('lat'):
-                loc[obj.get('id')] = (float(obj.get('lat')), float(obj.get('lon')))
+        for chunk in self.iter_chunks(node_ids, 500):
+            resp = requests.get(f'{OSM_API}/nodes', {'nodes': ",".join(chunk)})
+            logging.debug('Requesting nodes from OSM API: %s. Status code %s',
+                          ', '.join(chunk), resp.status_code)
+            if resp.status_code != 200:
+                raise KeyError(f'Missing node reference: {resp.text}. Req: {chunk}.')
+            xmlresp = etree.fromstring(resp.content)
+            for obj in xmlresp.findall('node'):
+                if obj.get('lat'):
+                    loc[obj.get('id')] = (float(obj.get('lat')), float(obj.get('lon')))
+
         # Now we need to test for deleted nodes
         for node_id in node_ids:
             if str(node_id) not in loc:
@@ -254,7 +283,9 @@ class AdiffBuilder:
                         break
         return loc
 
-    def wrong_tags(self, obj, tags):
+    def wrong_tags(self, obj, tags=None):
+        if tags is None:
+            tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
         return not self.tag_filter.is_empty and not self.tag_filter.get_kinds(obj.tag, tags)
 
     def process_osc(self, filename, adiff):
@@ -262,7 +293,9 @@ class AdiffBuilder:
         logging.info('Scanning for node locations')
         fileobj = gzip.open(filename)
         locations = self.scan_node_locations(fileobj)
-        fileobj.seek(0)
+        if not self.region_filter.is_empty:
+            logging.info('Downloading missing node locations')
+            self.scan_relevant_ways_nodes(fileobj, locations)
         logging.info('Iterating over actions')
         root = etree.Element('osm', version='0.6', generator='OSC to ADIFF')
         for _, action in etree.iterparse(fileobj, events=['end'],
@@ -333,8 +366,11 @@ class AdiffBuilder:
                         # Store locations to db
                         self.store_locations(new)
                         # Restore old version (locations already in the db)
-                        if old:
-                            self.stored_to_xml(na_old, old)
+                        if old is not None:
+                            if isinstance(old, StoredObject):
+                                self.stored_to_xml(na_old, old)
+                            else:
+                                na_old.append(old)
                             self.add_locations(na_old[0], locations)
                         self.db.save_object(StoredObject(
                             obj.tag, obj.get('id'), obj.get('version'), tags,
@@ -379,6 +415,8 @@ if __name__ == '__main__':
     else:
         log_level = logging.DEBUG
     logging.basicConfig(level=log_level, format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     conn = psycopg2.connect(
         dbname=options.database,
