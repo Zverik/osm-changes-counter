@@ -15,7 +15,7 @@ def update_byuser(byuser, current):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Reads a PostgreSQL adiff table and calculates user statistics.')
-    parser.add_argument('data', type=argparse.FileType('r'), default=sys.stdin,
+    parser.add_argument('-i', '--input', type=argparse.FileType('r'), default=sys.stdin,
                         help='CSV file from psql, with header')
     parser.add_argument('-o', '--output', type=argparse.FileType('w'), default=sys.stdout,
                         help='Where to write the resulting table')
@@ -29,7 +29,7 @@ if __name__ == '__main__':
     if options.users:
         for row in csv.reader(options.users):
             users.add(int(row[2]) if row[2] else row[1])
-    reader = csv.DictReader(options.data)
+    reader = csv.DictReader(options.input)
     rows = [r for r in reader]
     rows.sort(key=lambda r: (r['osm_id'], r['ts']))
 
