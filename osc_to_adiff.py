@@ -357,13 +357,13 @@ if __name__ == '__main__':
     psql.add_argument('-W', '--dbpass', help='PSQL password')
     options = parser.parse_args()
 
-    if options.verbose == 0:
+    if not options.verbose:
         log_level = logging.WARNING
-    if options.verbose == 1:
+    elif options.verbose == 1:
         log_level = logging.INFO
     else:
         log_level = logging.DEBUG
-        logging.basicConfig(level=log_level, format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
+    logging.basicConfig(level=log_level, format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
 
     conn = psycopg2.connect(
         dbname=options.database,
