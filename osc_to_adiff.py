@@ -333,6 +333,7 @@ class AdiffBuilder:
                         ))
                     else:
                         raise ValueError(f'Unknown osc action: {action.tag}')
+                obj.clear()
             action.clear()
         fileobj.close()
         logging.info('Done, writing the augmented diff')
