@@ -24,27 +24,74 @@ class TagFilter:
                 self.kinds[parts[0][0]][tag] = kind
                 self.relevant_keys.add(tag.split('=')[0])
 
-    def get_kinds(self, typ, tags) -> set:
-        """Receives a dict of tags and matches kinds to these."""
+    def check_context(self, ctx, tags1, tags2=None, strong_ctx=True) -> bool:
+        if not ctx:
+            return True
+        if tags2 is None:
+            tags2 = {}
+        kv = ctx.split('=')
+        if strong_ctx:
+            if kv[0] not in tags1 or kv[0] not in tags2:
+                return False
+            if len(kv) > 1 and (tags1[kv[0]] != kv[1] or tags2[kv[0]] != kv[1]):
+                return False
+        else:
+            if kv[0] not in tags1 and kv[0] not in tags2:
+                return False
+            if len(kv) > 1:
+                if tags1.get(kv[0]) != kv[1] and tags2.get(kv[0]) != kv[1]:
+                    return False
+        return True
+
+    def get_kinds(self, typ, tags, ctx_backup=None) -> set:
+        """
+        Receives a dict of tags and matches kinds to these.
+        Set ctx_backup for another tag set for context tags checking.
+        """
         if self.is_empty:
             return set()
         kinds = self.kinds.get(typ[0].lower(), {})
         result = set()
+        if ctx_backup is None:
+            ctx_backup = {}
         for tag, kind in kinds.items():
             if '+' in tag:
                 # Check for context
                 parts = tag.split('+')
                 tag = parts[0]
-                kv = parts[1].split('=')
-                if kv[0] not in tags:
-                    continue
-                if len(kv) > 1 and tags[kv[0]] != kv[1]:
+                if not self.check_context(parts[1], tags, ctx_backup, False):
                     continue
             # Check for the actual tag
             kv = tag.split('=')
             if kv[0] in tags:
                 if len(kv) == 1 or tags[kv[0]] == kv[1]:
                     result.add(kind)
+        return result
+
+    def get_modified_kinds(self, typ, tags_old, tags_new, strong_ctx=True) -> set:
+        """
+        Returns which kinds were modified, only for kinds both present in old and new.
+        Set strong_ctx to false to allow context tags to be in just one of the objects.
+        """
+        result = set()
+        if self.is_empty or not tags_old or not tags_new:
+            return result
+        kinds = self.kinds.get(typ[0].lower(), {})
+        for tag, kind in kinds.items():
+            if '+' in tag:
+                # Check for context
+                parts = tag.split('+')
+                tag = parts[0]
+                if not self.check_context(parts[1], tags_old, tags_new, strong_ctx):
+                    continue
+            # Check for the actual tag
+            kv = tag.split('=')
+            if kv[0] in tags_old and kv[0] in tags_new:
+                if len(kv) == 1 and tags_old[kv[0]] != tags_new[kv[0]]:
+                    result.add(kind)
+                elif len(kv) > 1 and tags_old[kv[0]] == kv[1] and tags_new[kv[0]] == kv[1]:
+                    if tags_old != tags_new:
+                        result.add(kind)
         return result
 
     def list_kinds(self, typ) -> dict:

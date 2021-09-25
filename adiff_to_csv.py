@@ -83,60 +83,17 @@ def init_data_from_object(obj, backup=None):
     return result
 
 
-class TagComparator:
-    def __init__(self, tag_filter):
-        self.tag_filter = tag_filter
-
-    def get_tag_action(self, tag, obj, old=None) -> str:
-        new_value = obj.get(tag)
-        old_value = old.get(tag)
-        if new_value == old_value:
-            return None
-        if new_value:
-            return 'create' if not old_value else 'modify'
-        else:
-            return 'delete'
-
-    def is_new_tag_action(self, k, v, obj, old=None) -> str:
-        has_new = obj.get(k) == v
-        has_old = old.get(k) == v
-        if has_new == has_old:
-            if has_old and obj != old:
-                return 'modify'
-            return None
-        return 'create' if not has_old else 'delete'
-
-    def reduce_tag_actions(self, acts) -> str:
-        actions = set([a for a in acts if a])
-        if not actions:
-            return None
-        if len(actions) == 1:
-            return list(actions)[0]
-        return 'modify'
-
-    def apply_kinds(self, obj, old=None):
-        result = []
-        kinds = self.tag_filter.list_kinds(obj.tag)
-        tobj = {kv.get('k'): kv.get('v') for kv in obj.findall('tag')}
-        told = {} if old is None else {kv.get('k'): kv.get('v') for kv in old.findall('tag')}
-        for kind, tags in kinds.items():
-            klist = []
-            for tag in tags:
-                if len(tag) > 1:
-                    # Confirm context: at least new or old tags should have it
-                    kv = tag[1].split('=')
-                    if kv[0] not in tobj and kv[0] not in told:
-                        continue
-                    if len(kv) > 1 and tobj.get(kv[0]) != kv[1] and told.get(kv[0]) != kv[1]:
-                        continue
-                # Check for the tag change
-                if '=' in tag[0]:
-                    kv = tag[0].split('=')
-                    klist.append(self.is_new_tag_action(kv[0], kv[1], tobj, told))
-                else:
-                    klist.append(self.get_tag_action(tag[0], tobj, told))
-            result.append((kind, self.reduce_tag_actions(klist)))
-        return [r for r in result if r[1]]
+def compare_kinds(tag_filter, obj, old=None):
+    result = []
+    tobj = {kv.get('k'): kv.get('v') for kv in obj.findall('tag')}
+    told = {} if old is None else {kv.get('k'): kv.get('v') for kv in old.findall('tag')}
+    new_kinds = tag_filter.get_kinds(obj.tag, tobj, told)
+    old_kinds = tag_filter.get_kinds(obj.tag, told, tobj)
+    modified = tag_filter.get_modified_kinds(obj.tag, told, tobj, False)
+    result.extend([(k, 'create') for k in new_kinds - old_kinds])
+    result.extend([(k, 'delete') for k in old_kinds - new_kinds])
+    result.extend([(k, 'modify') for k in modified])
+    return result
 
 
 def is_way_inside(way, another):
@@ -238,8 +195,7 @@ def process_single_action(action, adiff, regions=None, tag_filter=None):
                 obj = ancestor  # just for comparing tags
     data['obj_action'] = atype
     # Find tagging differences and write them out.
-    tag_comp = TagComparator(tag_filter)
-    kinds = tag_comp.apply_kinds(obj, old)
+    kinds = compare_kinds(tag_filter, obj, old)
     for k in kinds:
         data['action'] = k[1]
         data['kind'] = k[0]
