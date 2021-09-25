@@ -12,6 +12,7 @@ NEXT_SEQ="$(${PSQL[@]} -qAtc 'select ts + 1 from osc_tracker_ts order by ts desc
 REPLICATION='https://planet.openstreetmap.org/replication/hour'
 SEQ="$(curl -s "$REPLICATION/state.txt" | grep sequenceNumber | cut -d = -f 2)"
 
+echo "Updating to sequence number $SEQ"
 for ts in $(seq $NEXT_SEQ $SEQ); do
     URL="$REPLICATION/000/$(printf %03d $(($ts/1000)))/$(printf %03d $(($ts%1000))).osc.gz"
     echo "$(date +%H:%M:%S): $URL"

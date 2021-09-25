@@ -119,11 +119,12 @@ class AdiffBuilder:
             return None if not loc else loc[list(loc.keys())[0]]
 
     def get_locations_from_everywhere(self, node_ids, locations):
-        loc = {k: locations[k] for k in node_ids if k in locations}
-        if len(loc) < len(node_ids):
-            loc.update(self.db.get_locations(set(node_ids) - loc.keys()))
-        if len(loc) < len(node_ids):
-            loc.update(self.download_node_locations(set(node_ids) - loc.keys()))
+        id_set = set(node_ids)
+        loc = {k: locations[k] for k in id_set if k in locations}
+        if len(loc) < len(id_set):
+            loc.update(self.db.get_locations(id_set - loc.keys()))
+        if len(loc) < len(id_set):
+            loc.update(self.download_node_locations(id_set - loc.keys()))
         return loc
 
     def add_locations(self, obj, locations):
@@ -221,6 +222,8 @@ class AdiffBuilder:
         Downloads locations from OSM API.
         Returns a dict of node_id -> (lat, lon).
         """
+        if not node_ids:
+            return {}
         resp = requests.get(f'{OSM_API}/nodes', {'nodes': ",".join(node_ids)})
         if resp.status_code != 200:
             raise KeyError(f'Missing node reference: {resp.text}. Req: {node_ids}.')
