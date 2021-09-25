@@ -268,71 +268,71 @@ class AdiffBuilder:
         root = etree.Element('osm', version='0.6', generator='OSC to ADIFF')
         for _, action in etree.iterparse(fileobj, events=['end'],
                                          tag=['create', 'modify', 'delete']):
-            obj = action[0]
-            logging.debug('Processing action %s for object %s %s v%s',
-                          action.tag, obj.tag, obj.get('id'), obj.get('version'))
-            if not self.region_filter.is_empty:
-                point = self.get_representative_point(obj, locations)
-                if not point or not self.region_filter.find(point[1], point[0]):
-                    # No coords or coord is not in a region
-                    continue
-            tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
-            if action.tag == 'create':
-                # No tag history, just check what we have
-                if self.wrong_tags(obj, tags):
-                    continue
-                # Simply copy as-is, adding locations to way nodes
-                na = etree.SubElement(root, 'action', type='create')
-                new = self.copy_with_locations(na, obj, locations)
-                # Store locations to db
-                self.store_locations(new)
-                # Add object to our database to monitor its changes
-                self.db.save_object(StoredObject(
-                    obj.tag, obj.get('id'), obj.get('version'), tags,
-                    self.get_node_ids(obj)
-                ))
-            else:
-                old = db.read_object(obj.tag, obj.get('id'))
-                # Skipping if there is no history (meaning no relevant tags in old versions)
-                # and no relevant tags in the new version.
-                if not old and self.wrong_tags(obj, tags):
-                    continue
-                if action.tag == 'delete' and not old:
-                    # Skip deletions of things we don't have history on
-                    continue
-                na = etree.SubElement(root, 'action', type=action.tag)
-                na_old = etree.SubElement(na, 'old')
-                na_new = etree.SubElement(na, 'new')
-                if action.tag == 'delete':
-                    # Restore old version
-                    self.stored_to_xml(na_old, old)
-                    # Add locations to old nodes and save them to db if needed
-                    self.add_locations(na_old[0], locations)
-                    self.store_locations(na_old[0])
-                    # Note that even for ways there are no tags and no referenced nodes
-                    self.copy_with_locations(na_new, obj, locations)
-                    # Register deletion as zero tags to our database
-                    self.db.save_object(StoredObject(
-                        obj.tag, obj.get('id'), obj.get('version'), {}
-                    ))
-                elif action.tag == 'modify':
-                    if not old:
-                        old = self.download_version(
-                            obj.tag, obj.get('id'), int(obj.get('version')) - 1)
-                    # First copy new version with locations
-                    new = self.copy_with_locations(na_new, obj, locations)
+            for obj in action:
+                logging.debug('Processing action %s for object %s %s v%s',
+                              action.tag, obj.tag, obj.get('id'), obj.get('version'))
+                if not self.region_filter.is_empty:
+                    point = self.get_representative_point(obj, locations)
+                    if not point or not self.region_filter.find(point[1], point[0]):
+                        # No coords or coord is not in a region
+                        continue
+                tags = {t.get('k'): t.get('v') for t in obj.findall('tag')}
+                if action.tag == 'create':
+                    # No tag history, just check what we have
+                    if self.wrong_tags(obj, tags):
+                        continue
+                    # Simply copy as-is, adding locations to way nodes
+                    na = etree.SubElement(root, 'action', type='create')
+                    new = self.copy_with_locations(na, obj, locations)
                     # Store locations to db
                     self.store_locations(new)
-                    # Restore old version (locations already in the db)
-                    if old:
-                        self.stored_to_xml(na_old, old)
-                        self.add_locations(na_old[0], locations)
+                    # Add object to our database to monitor its changes
                     self.db.save_object(StoredObject(
                         obj.tag, obj.get('id'), obj.get('version'), tags,
                         self.get_node_ids(obj)
                     ))
                 else:
-                    raise ValueError(f'Unknown osc action: {action.tag}')
+                    old = db.read_object(obj.tag, obj.get('id'))
+                    # Skipping if there is no history (meaning no relevant tags in old versions)
+                    # and no relevant tags in the new version.
+                    if not old and self.wrong_tags(obj, tags):
+                        continue
+                    if action.tag == 'delete' and not old:
+                        # Skip deletions of things we don't have history on
+                        continue
+                    na = etree.SubElement(root, 'action', type=action.tag)
+                    na_old = etree.SubElement(na, 'old')
+                    na_new = etree.SubElement(na, 'new')
+                    if action.tag == 'delete':
+                        # Restore old version
+                        self.stored_to_xml(na_old, old)
+                        # Add locations to old nodes and save them to db if needed
+                        self.add_locations(na_old[0], locations)
+                        self.store_locations(na_old[0])
+                        # Note that even for ways there are no tags and no referenced nodes
+                        self.copy_with_locations(na_new, obj, locations)
+                        # Register deletion as zero tags to our database
+                        self.db.save_object(StoredObject(
+                            obj.tag, obj.get('id'), obj.get('version'), {}
+                        ))
+                    elif action.tag == 'modify':
+                        if not old:
+                            old = self.download_version(
+                                obj.tag, obj.get('id'), int(obj.get('version')) - 1)
+                        # First copy new version with locations
+                        new = self.copy_with_locations(na_new, obj, locations)
+                        # Store locations to db
+                        self.store_locations(new)
+                        # Restore old version (locations already in the db)
+                        if old:
+                            self.stored_to_xml(na_old, old)
+                            self.add_locations(na_old[0], locations)
+                        self.db.save_object(StoredObject(
+                            obj.tag, obj.get('id'), obj.get('version'), tags,
+                            self.get_node_ids(obj)
+                        ))
+                    else:
+                        raise ValueError(f'Unknown osc action: {action.tag}')
             action.clear()
         fileobj.close()
         logging.info('Done, writing the augmented diff')
