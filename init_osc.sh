@@ -25,3 +25,4 @@ fi
 ${PSQL[@]} -c "create table if not exists osc_tracker_ts (ts integer);"
 ${PSQL[@]} -c "delete from osc_tracker_ts;"
 ${PSQL[@]} -c "insert into osc_tracker_ts (ts) values ($SEQ);"
+${PSQL[@]} -c "delete from osc_tracker;" || true
