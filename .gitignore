@@ -5,5 +5,5 @@ u*.csv
 venv/
 __pycache__/
 *.osc
-[ansu]*.csv
+[ansuo]*.csv
 *.pbf

@@ -2,6 +2,8 @@ import argparse
 import psycopg2
 import osmium
 import requests
+import logging
+import gzip
 from lxml import etree
 from osc_db import OscDatabase, StoredObject
 from filters import TagFilter, RegionFilter
@@ -79,14 +81,13 @@ class AdiffBuilder:
         self.tag_filter = tag_filter
         self.region_filter = region_filter
 
-    def scan_node_locations(self, osc) -> dict:
+    def scan_node_locations(self, filename) -> dict:
         """Searches for nodes and returns dict of node_id -> (lat, lon)."""
         locs = {}
-        for action in osc:
-            for node in action.findall('node'):
-                node_id = node.get('id')
-                if node.get('lat'):
-                    locs[node_id] = float(node.get('lat')), float(node.get('lon'))
+        for _, node in etree.iterparse(filename, events=['end'], tag='node'):
+            node_id = node.get('id')
+            if node.get('lat'):
+                locs[node_id] = float(node.get('lat')), float(node.get('lon'))
         return locs
 
     def get_node_ids(self, obj):
@@ -210,6 +211,8 @@ class AdiffBuilder:
 
     def download_version(self, osm_type, osm_id, version):
         resp = requests.get(f'{OSM_API}/{osm_type}/{osm_id}/{version}')
+        logging.debug('Queried OSM API for %s %s v%s, status code %s',
+                      osm_type, osm_id, version, resp.status_code)
         if resp.status_code != 200:
             return None
         obj = etree.fromstring(resp.content)[0]
@@ -224,7 +227,9 @@ class AdiffBuilder:
         """
         if not node_ids:
             return {}
+        logging.debug('Requesting nodes from OSM API: %s', ', '.join(node_ids))
         resp = requests.get(f'{OSM_API}/nodes', {'nodes': ",".join(node_ids)})
+        logging.debug('Queried OSM API for nodes, status code %s', resp.status_code)
         if resp.status_code != 200:
             raise KeyError(f'Missing node reference: {resp.text}. Req: {node_ids}.')
         loc = {}
@@ -236,6 +241,8 @@ class AdiffBuilder:
         for node_id in node_ids:
             if str(node_id) not in loc:
                 resp = requests.get(f'{OSM_API}/node/{node_id}/history')
+                logging.debug('Requested node %s history, status code %s',
+                              node_id, resp.status_code)
                 if resp.status_code != 200:
                     raise IOError(f'Failed to retrieve history for node {node_id}.')
                 xmlresp = etree.fromstring(resp.content)
@@ -249,11 +256,17 @@ class AdiffBuilder:
         return not self.tag_filter.is_empty and not self.tag_filter.get_kinds(obj.tag, tags)
 
     def process_osc(self, filename, adiff):
-        osc = etree.parse(filename).getroot()
-        locations = self.scan_node_locations(osc)
+        logging.info('Reading osmChange file %s', filename)
+        logging.debug('Scanning for node locations')
+        fileobj = gzip.open(filename)
+        locations = self.scan_node_locations(fileobj)
+        fileobj.seek(0)
         root = etree.Element('osm', version='0.6', generator='OSC to ADIFF')
-        for action in osc:
+        for _, action in etree.iterparse(fileobj, events=['end'],
+                                         tag=['create', 'modify', 'delete']):
             obj = action[0]
+            logging.debug('Processing action %s for object %s %s v%s',
+                          action.tag, obj.tag, obj.get('id'), obj.get('version'))
             if not self.region_filter.is_empty:
                 point = self.get_representative_point(obj, locations)
                 if not point or not self.region_filter.find(point[1], point[0]):
@@ -316,6 +329,9 @@ class AdiffBuilder:
                     ))
                 else:
                     raise ValueError(f'Unknown osc action: {action.tag}')
+            action.clear()
+        fileobj.close()
+        logging.debug('Done, writing the augmented diff')
         tree = etree.ElementTree(root)
         tree.write(adiff, pretty_print=True, encoding='utf-8')
 
@@ -331,6 +347,8 @@ if __name__ == '__main__':
                         help='File with a list of tags to watch')
     parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
                         help='CSV file with names and wkb geometry for regions to filter')
+    parser.add_argument('-v', '--verbose', action='count', default=0,
+                        help='Print messages. Specify twice to print debug messages')
     psql = parser.add_argument_group('PostgreSQL connection')
     psql.add_argument('-d', '--database', required=True, help='PSQL database name')
     psql.add_argument('-H', '--dbhost', help='PSQL hostname, default is localhost')
@@ -338,6 +356,14 @@ if __name__ == '__main__':
     psql.add_argument('-U', '--dbuser', help='PSQL user')
     psql.add_argument('-W', '--dbpass', help='PSQL password')
     options = parser.parse_args()
+
+    if options.verbose == 0:
+        log_level = logging.WARNING
+    if options.verbose == 1:
+        log_level = logging.INFO
+    else:
+        log_level = logging.DEBUG
+        logging.basicConfig(level=log_level, format='%(asctime)s %(message)s', datefmt='%H:%M:%S')
 
     conn = psycopg2.connect(
         dbname=options.database,
