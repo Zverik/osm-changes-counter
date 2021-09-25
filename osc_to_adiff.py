@@ -317,27 +317,7 @@ class AdiffBuilder:
         tree.write(adiff, pretty_print=True, encoding='utf-8')
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Converts osmChange to Augmented Diffs based on tag and region filters.')
-    parser.add_argument('action', choices=['init', 'process'])
-    parser.add_argument('input', help='Source file, either a pbf or an osmChange')
-    parser.add_argument('-a', '--adiff', type=argparse.FileType('wb'),
-                        help='Augmented diff file to produce')
-    parser.add_argument('-t', '--tags', type=argparse.FileType('r'),
-                        help='File with a list of tags to watch')
-    parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
-                        help='CSV file with names and wkb geometry for regions to filter')
-    psql = parser.add_argument_group('PostgreSQL connection')
-    psql.add_argument('-d', '--database', required=True, help='PSQL database name')
-    psql.add_argument('-H', '--dbhost', default='localhost',
-                      help='PSQL hostname, default is localhost')
-    psql.add_argument('-P', '--dbport', type=int, default=5432,
-                      help='PSQL port, default is 5432')
-    psql.add_argument('-U', '--dbuser', help='PSQL user')
-    psql.add_argument('-W', '--dbpass', help='PSQL password')
-    options = parser.parse_args()
-
+def connect_to_psql(options):
     if not options.dbuser and not options.dbpass:
         # Due to auth issues use a dsn string
         pgargs = {'dbname': options.database}
@@ -355,7 +335,29 @@ if __name__ == '__main__':
             host=options.dbhost,
             port=options.dbport,
         )
+    return conn
 
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Converts osmChange to Augmented Diffs based on tag and region filters.')
+    parser.add_argument('action', choices=['init', 'process'])
+    parser.add_argument('input', help='Source file, either a pbf or an osmChange')
+    parser.add_argument('-a', '--adiff', type=argparse.FileType('wb'),
+                        help='Augmented diff file to produce')
+    parser.add_argument('-t', '--tags', type=argparse.FileType('r'),
+                        help='File with a list of tags to watch')
+    parser.add_argument('-r', '--regions', type=argparse.FileType('r'),
+                        help='CSV file with names and wkb geometry for regions to filter')
+    psql = parser.add_argument_group('PostgreSQL connection')
+    psql.add_argument('-d', '--database', required=True, help='PSQL database name')
+    psql.add_argument('-H', '--dbhost', help='PSQL hostname, default is localhost')
+    psql.add_argument('-P', '--dbport', type=int, help='PSQL port, default is 5432')
+    psql.add_argument('-U', '--dbuser', help='PSQL user')
+    psql.add_argument('-W', '--dbpass', help='PSQL password')
+    options = parser.parse_args()
+
+    conn = connect_to_psql(options)
     tags = TagFilter(options.tags)
     regions = RegionFilter(options.regions)
     db = OscDatabase(conn, tags)

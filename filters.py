@@ -7,7 +7,7 @@ from shapely.strtree import STRtree
 class TagFilter:
     def __init__(self, fileobj):
         self.relevant_keys = set()
-        self.kinds = {'n': {}, 'w': {}}
+        self.kinds = {'n': {}, 'w': {}, 'r': {}, 'a': {}}
         if fileobj:
             self.load(fileobj)
 
@@ -26,7 +26,7 @@ class TagFilter:
         """Receives a dict of tags and matches kinds to these."""
         if self.is_empty:
             return set()
-        kinds = self.kinds[typ[0].lower()]
+        kinds = self.kinds.get(typ[0].lower(), {})
         result = set()
         for tag, kind in kinds.items():
             if '=' in tag:
@@ -40,7 +40,7 @@ class TagFilter:
 
     def list_kinds(self, typ) -> dict:
         """Returns a dict of kind -> [tag1, tag2, ...]."""
-        kinds = self.kinds[typ[0].lower()]
+        kinds = self.kinds.get(typ[0].lower(), {})
         result = {}
         for tag, kind in kinds.items():
             if kind not in result:
