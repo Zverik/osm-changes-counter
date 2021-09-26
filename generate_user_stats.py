@@ -229,7 +229,7 @@ if __name__ == '__main__':
         for row in sorted(data.values(), key=lambda r: r['score'], reverse=True):
             w.writerow(row)
     else:
-        json_data = prepare_json(result, usernames)
+        json_data = prepare_json(result)
         json_data = [r for r in json_data if not drop_user(users, usernames, r['uid'])]
         for row in json_data:
             row['user'] = usernames[row['uid']]
@@ -241,9 +241,9 @@ if __name__ == '__main__':
         ), 'r').read()
         template = template.replace('{{min_ts}}', min_ts)
         template = template.replace('{{max_ts}}', max_ts)
-        template = template.replace('{{usergroups}}', json.dumps(weights.usergroups))
-        template = template.replace('{{columns}}', json.dumps(columns))
+        template = template.replace('{{usergroups}}', json.dumps(weights.usergroups, ensure_ascii=False))
+        template = template.replace('{{columns}}', json.dumps(columns, ensure_ascii=False))
         template = template.replace('{{tr_columns}}', json.dumps(
-            [weights.labels.get(c, c) for c in columns]))
-        template = template.replace('{{data}}', json.dumps(json_data))
+            [weights.labels.get(c, c) for c in columns], ensure_ascii=False))
+        template = template.replace('{{data}}', json.dumps(json_data, ensure_ascii=False))
         options.output.write(template)

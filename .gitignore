@@ -9,3 +9,4 @@ __pycache__/
 *.pbf
 *.log
 *.sql
+[st]*.html
