@@ -43,6 +43,20 @@ class TagFilter:
                     return False
         return True
 
+    def matches(self, tag, tags, ctx_backup=None) -> bool:
+        if '+' in tag:
+            # Check for context
+            parts = tag.split('+')
+            tag = parts[0]
+            if not self.check_context(parts[1], tags, ctx_backup, False):
+                return False
+        # Check for the actual tag
+        kv = tag.split('=')
+        if kv[0] in tags:
+            if len(kv) == 1 or tags[kv[0]] == kv[1]:
+                return True
+        return False
+
     def get_kinds(self, typ, tags, ctx_backup=None) -> set:
         """
         Receives a dict of tags and matches kinds to these.
@@ -52,20 +66,9 @@ class TagFilter:
             return set()
         kinds = self.kinds.get(typ[0].lower(), {})
         result = set()
-        if ctx_backup is None:
-            ctx_backup = {}
         for tag, kind in kinds.items():
-            if '+' in tag:
-                # Check for context
-                parts = tag.split('+')
-                tag = parts[0]
-                if not self.check_context(parts[1], tags, ctx_backup, False):
-                    continue
-            # Check for the actual tag
-            kv = tag.split('=')
-            if kv[0] in tags:
-                if len(kv) == 1 or tags[kv[0]] == kv[1]:
-                    result.add(kind)
+            if self.matches(tag, tags, ctx_backup):
+                result.add(kind)
         return result
 
     def get_modified_kinds(self, typ, tags_old, tags_new, strong_ctx=True) -> set:
@@ -92,6 +95,15 @@ class TagFilter:
                 elif len(kv) > 1 and tags_old[kv[0]] == kv[1] and tags_new[kv[0]] == kv[1]:
                     if tags_old != tags_new:
                         result.add(kind)
+        # Check for new or deleted tags of the same kind
+        for kind in set(kinds.values()):
+            kind_tags = set([t for t, k in kinds.items() if k == kind])
+            old_opts = set([t for t in kind_tags if self.matches(
+                t, tags_old, None if strong_ctx else tags_new)])
+            new_opts = set([t for t in kind_tags if self.matches(
+                t, tags_new, None if strong_ctx else tags_old)])
+            if old_opts and new_opts and old_opts != new_opts:
+                result.add(kind)
         return result
 
     def list_kinds(self, typ) -> dict:
