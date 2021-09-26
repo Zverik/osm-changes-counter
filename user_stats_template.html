@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <title>Конкурс OSM</title>
+    <meta charset="utf-8">
+    <script type="text/javascript" src="sorttable.js"></script>
+    <script type="text/javascript">
+      data = {{data}};
+      userGroups = {{usergroups}};
+      columns = {{columns}};
+      columnLabels = {{tr_columns}};
+    </script>
+  </head>
+  <body>
+    <h1>Статистика конкурса OSM</h1>
+    <p>Учтены правки с {{min_ts}} по {{max_ts}}.</p>
+    <p><select size="1" onchange="buildTable(this.value);" id="select">
+    </select></p>
+    <table class="sortable" id="table">
+    </table>
+    <script type="text/javascript">
+      function buildTable(region) {
+        let table = document.getElementById('table');
+        // TODO: header
+        // TODO: content
+      }
+
+      function populateSelect() {
+        let sel = document.getElementById('select');
+        let regions = [];
+        // TODO: extract regions
+        // TODO: populate select
+      }
+
+      populateSelect();
+      buildTable();
+    </script>
+  </body>
+</html>

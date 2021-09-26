@@ -1,0 +1,19 @@
+modify: 0.5
+type.node: 1000
+type.way: 1
+crossing.modify: 0.9
+crossing_island: 1.5
+traffic_calming: 1.1
+
+usergroup.1: Опытные
+usergroup.2: Новички
+
+user.label: Участник
+crossing.label: Переходы
+crossing_island.label: Островки
+stop.label: Остановки
+traffic_calming.label: Леж. полиц.
+lanes.label: Полосность
+maxspeed.label: Скорость
+lit.label: Освещённость
+score.label: Баллы

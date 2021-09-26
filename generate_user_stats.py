@@ -2,6 +2,8 @@
 import argparse
 import csv
 import sys
+import os
+import json
 
 
 class Weights:
@@ -11,7 +13,36 @@ class Weights:
             self.load(fileobj)
 
     def load(self, fileobj):
-        pass
+        for row in fileobj:
+            parts = [r.strip() for r in row.split(':', 1)]
+            if len(parts) != 2:
+                continue
+            k = parts[0]
+            if '.' in k:
+                kk = k.split('.')
+                k = kk[0]
+                t = kk[1]
+            else:
+                t = None
+            v = parts[1]
+            if k == 'modify':
+                self.modify = float(v)
+            elif k == 'type' and t:
+                self.types[t] = float(v)
+            elif k == 'usergroup':
+                self.usergroups[t] = v
+            elif t == 'label':
+                self.labels[k] = v
+            else:
+                if k not in self.weights:
+                    self.weights[k] = [1]
+                if t is None:
+                    self.weights[k][0] = float(v)
+                elif t == 'modify':
+                    if len(self.weights[k]) == 1:
+                        self.weights[k].append(float(v))
+                    else:
+                        self.weights[k][1] = float(v)
 
     def defaults(self):
         self.modify = 0.5
@@ -21,6 +52,8 @@ class Weights:
             'relation': 2000,
         }
         self.weights = {}
+        self.labels = {}
+        self.usergroups = {}
 
     def calculate(self, row):
         value = float(row['value']) or 1
@@ -28,10 +61,11 @@ class Weights:
 
     def get(self, osm_id, kind, is_modify):
         typ = row['osm_id'].split('/')[0]
-        weight = self.weights.get(row['kind'], (self.types[typ],))
+        weight = self.weights.get(row['kind'], [1])
+        base = self.types[typ] * weight[0]
         if not is_modify:
-            return weight[0]
-        return weight[0] * (weight[1] if len(weight) > 1 else self.modify)
+            return base
+        return base * (weight[1] if len(weight) > 1 else self.modify)
 
 
 def update_result(result, weights, current, osm_id, kind, region):
@@ -59,6 +93,24 @@ def count_by_user(result, region=None):
         table[uid][kind] += v[0]
         table[uid]['score'] += v[1]
     return table
+
+
+def prepare_json(result, usernames):
+    table = {}  # (uid, region) -> dict of kinds
+    for k, v in result.items():
+        ur = (k[0], k[1])
+        kind = k[2]
+        if ur not in table:
+            table[ur] = {
+                'user': usernames[k[0]],
+                'region': k[1],
+                'score': 0
+            }
+        if kind not in table[ur]:
+            table[ur][kind] = 0
+        table[ur][kind] += v[0]
+        table[ur]['score'] += v[1]
+    return list(table.values())
 
 
 if __name__ == '__main__':
@@ -98,6 +150,7 @@ if __name__ == '__main__':
     # negative if that was "delete"
     osm_id_kind = None  # (osm_id, kind, region)
     result = {}  # (uid, region, kind) -> (count, score)
+    min_ts = max_ts = None  # plain string
     for row in rows:
         oik = (row['osm_id'], row['kind'], row['region'])
         if osm_id_kind != oik:
@@ -110,6 +163,10 @@ if __name__ == '__main__':
         uid = row['uid']
         usernames[uid] = row['username']
         columns[1 if row['length'] else 0].add(row['kind'])
+        if not min_ts or row['ts'] < min_ts:
+            min_ts = row['ts']
+        if not max_ts or row['ts'] > max_ts:
+            max_ts = row['ts']
         if uid not in current:
             current[uid] = [0, 0]
 
@@ -137,6 +194,7 @@ if __name__ == '__main__':
                   osm_id_kind[1], osm_id_kind[2])
 
     # Writing the result
+    columns = ['user'] + sorted(columns[0]) + sorted(columns[1]) + ['score']
     if options.csv:
         data = count_by_user(result)
         for uid in data:
@@ -145,10 +203,20 @@ if __name__ == '__main__':
                     continue
             data[uid]['user'] = usernames[uid]
 
-        columns = ['user'] + sorted(columns[0]) + sorted(columns[1]) + ['score']
         w = csv.DictWriter(options.output, columns)
-        w.writeheader()
+        w.writerow({c: weights.labels.get(c, c) for c in columns})
         for row in sorted(data.values(), key=lambda r: r['score'], reverse=True):
             w.writerow(row)
     else:
-        raise Exception('HTML printing is not implemented yet.')
+        json_data = prepare_json(result, usernames)
+        template = open(os.path.join(
+            os.path.dirname(__file__), 'user_stats_template.html'
+        ), 'r').read()
+        template = template.replace('{{min_ts}}', min_ts)
+        template = template.replace('{{max_ts}}', max_ts)
+        template = template.replace('{{usergroups}}', json.dumps(weights.usergroups))
+        template = template.replace('{{columns}}', json.dumps(columns))
+        template = template.replace('{{tr_columns}}', json.dumps(
+            [weights.labels.get(c, c) for c in columns]))
+        template = template.replace('{{data}}', json.dumps(json_data))
+        options.output.write(template)
