@@ -29,7 +29,7 @@ class Weights:
                 self.modify = float(v)
             elif k == 'type' and t:
                 self.types[t] = float(v)
-            elif k == 'usergroup':
+            elif k == 'usergroup' and t != 'label':
                 self.usergroups[t] = v
             elif t == 'label':
                 self.labels[k] = v
@@ -92,17 +92,21 @@ def count_by_user(result, region=None):
             table[uid][kind] = 0
         table[uid][kind] += v[0]
         table[uid]['score'] += v[1]
+    # Round all numbers
+    for v in table.values():
+        for k in v:
+            v[k] = round(v[k])
     return table
 
 
-def prepare_json(result, usernames):
+def prepare_json(result):
     table = {}  # (uid, region) -> dict of kinds
     for k, v in result.items():
         ur = (k[0], k[1])
         kind = k[2]
         if ur not in table:
             table[ur] = {
-                'user': usernames[k[0]],
+                'uid': k[0],
                 'region': k[1],
                 'score': 0
             }
@@ -110,7 +114,16 @@ def prepare_json(result, usernames):
             table[ur][kind] = 0
         table[ur][kind] += v[0]
         table[ur]['score'] += v[1]
+    # Round all numbers
+    for v in table.values():
+        for k in v:
+            if k not in ('uid', 'region'):
+                v[k] = round(v[k])
     return list(table.values())
+
+
+def drop_user(users, usernames, uid):
+    return users and uid not in users and usernames[uid] not in users
 
 
 if __name__ == '__main__':
@@ -130,9 +143,12 @@ if __name__ == '__main__':
 
     weights = Weights(options.weights)
     users = set()
+    usergroups = {}
     if options.users:
         for row in csv.reader(options.users):
             users.add(row[2] or row[1])
+            if len(row) > 3 and row[3].strip():
+                usergroups[row[2] or row[1]] = row[3].strip()
 
     reader = csv.DictReader(options.input)
     rows = [r for r in reader]
@@ -195,13 +211,18 @@ if __name__ == '__main__':
 
     # Writing the result
     columns = ['user'] + sorted(columns[0]) + sorted(columns[1]) + ['score']
+    if usergroups:
+        columns.append('usergroup')
     if options.csv:
         data = count_by_user(result)
-        for uid in data:
-            if users:
-                if uid not in users and usernames[uid] not in users:
-                    continue
+        for uid in list(data.keys()):
+            if drop_user(users, usernames, uid):
+                del data[uid]
+                continue
             data[uid]['user'] = usernames[uid]
+            if usergroups:
+                group = usergroups.get(uid) or usergroups.get(usernames[uid])
+                data[uid]['usergroup'] = weights.usergroups.get(group, group)
 
         w = csv.DictWriter(options.output, columns)
         w.writerow({c: weights.labels.get(c, c) for c in columns})
@@ -209,6 +230,12 @@ if __name__ == '__main__':
             w.writerow(row)
     else:
         json_data = prepare_json(result, usernames)
+        json_data = [r for r in json_data if not drop_user(users, usernames, r['uid'])]
+        for row in json_data:
+            row['user'] = usernames[row['uid']]
+            if usergroups:
+                group = usergroups.get(row['uid']) or usergroups.get(row['user'])
+                row['usergroup'] = weights.usergroups.get(group, group)
         template = open(os.path.join(
             os.path.dirname(__file__), 'user_stats_template.html'
         ), 'r').read()

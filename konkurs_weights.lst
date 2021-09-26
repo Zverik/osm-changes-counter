@@ -9,6 +9,7 @@ usergroup.1: Опытные
 usergroup.2: Новички
 
 user.label: Участник
+usergroup.label: Уровень
 crossing.label: Переходы
 crossing_island.label: Островки
 stop.label: Остановки
