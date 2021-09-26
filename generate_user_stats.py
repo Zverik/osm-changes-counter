@@ -241,7 +241,8 @@ if __name__ == '__main__':
         ), 'r').read()
         template = template.replace('{{min_ts}}', min_ts)
         template = template.replace('{{max_ts}}', max_ts)
-        template = template.replace('{{usergroups}}', json.dumps(weights.usergroups, ensure_ascii=False))
+        template = template.replace('{{usergroups}}', json.dumps(
+            weights.usergroups, ensure_ascii=False))
         template = template.replace('{{columns}}', json.dumps(columns, ensure_ascii=False))
         template = template.replace('{{tr_columns}}', json.dumps(
             [weights.labels.get(c, c) for c in columns], ensure_ascii=False))
