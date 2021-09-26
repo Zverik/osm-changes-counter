@@ -131,6 +131,11 @@ class AdiffBuilder:
             node_ids = [obj.get('id')]
         else:
             node_ids = set(self.get_node_ids(obj))
+            if not node_ids:
+                # Deleted way/relation, get nodes from the database
+                old = self.db.read_object(obj.tag, obj.get('id'))
+                if old and old.nodes:
+                    node_ids = set(old.nodes)
         if not node_ids:
             return None
 
@@ -143,16 +148,16 @@ class AdiffBuilder:
             loc = self.download_node_locations(list(node_ids)[:1])
         return None if not loc else loc[list(loc.keys())[0]]
 
-    def get_locations_from_everywhere(self, node_ids, locations):
+    def get_locations_from_everywhere(self, node_ids, locations=None):
         id_set = set(node_ids)
-        loc = {k: locations[k] for k in id_set if k in locations}
+        loc = {} if not locations else {k: locations[k] for k in id_set if k in locations}
         if len(loc) < len(id_set):
             loc.update(self.db.get_locations(id_set - loc.keys()))
         if len(loc) < len(id_set):
             loc.update(self.download_node_locations(id_set - loc.keys()))
         return loc
 
-    def add_locations(self, obj, locations):
+    def add_locations(self, obj, locations=None):
         if obj.tag == 'node':
             return
         bounds = Bounds()
@@ -167,6 +172,8 @@ class AdiffBuilder:
                         nd.set('lat', str(loc[nd_id][0]))
                         nd.set('lon', str(loc[nd_id][1]))
                         bounds.extend(*loc[nd_id])
+                else:
+                    bounds.extend(float(nd.get('lat')), float(nd.get('lon')))
 
         if obj.tag == 'relation':
             # Set coordinates only for nodes
@@ -177,9 +184,14 @@ class AdiffBuilder:
                         nd.set('lat', str(loc[nd_id][0]))
                         nd.set('lon', str(loc[nd_id][1]))
                         bounds.extend(*loc[nd_id])
+                elif nd.get('type') == 'node':
+                    bounds.extend(float(nd.get('lat')), float(nd.get('lon')))
 
         if not bounds.is_empty:
-            obj.append(bounds.to_xml())
+            if obj.find('bounds') is None:
+                obj.append(bounds.to_xml())
+        else:
+            logging.debug('No bounds to add to %s %s', obj.tag, obj.get('id'))
 
     def copy_with_locations(self, parent, obj, locations):
         new = etree.SubElement(parent, obj.tag)
@@ -225,12 +237,11 @@ class AdiffBuilder:
         for k, v in stored.tags.items():
             etree.SubElement(obj, 'tag', k=k, v=v)
         if stored.nodes:
-            loc = self.db.get_locations(stored.nodes)
             for node_id in stored.nodes:
-                nd = etree.SubElement(obj, 'nd', ref=str(node_id))
-                if node_id in loc:
-                    nd.set('lat', str(loc[node_id][0]))
-                    nd.set('lon', str(loc[node_id][1]))
+                if stored.typ == 'way':
+                    etree.SubElement(obj, 'nd', ref=node_id)
+                else:
+                    etree.SubElement(obj, 'member', ref=node_id, type='node', role='')
         return obj
 
     def download_version(self, osm_type, osm_id, version):
@@ -349,8 +360,9 @@ class AdiffBuilder:
                         # Restore old version
                         self.stored_to_xml(na_old, old)
                         # Add locations to old nodes and save them to db if needed
-                        self.add_locations(na_old[0], locations)
-                        self.store_locations(na_old[0])
+                        # Not passing locations to use stored ones.
+                        self.add_locations(na_old[0])
+                        # self.store_locations(na_old[0])  # not sure this is needed
                         # Note that even for ways there are no tags and no referenced nodes
                         self.copy_with_locations(na_new, obj, locations)
                         # Register deletion as zero tags to our database
@@ -358,20 +370,21 @@ class AdiffBuilder:
                             obj.tag, obj.get('id'), obj.get('version'), {}
                         ))
                     elif action.tag == 'modify':
-                        if not old:
-                            old = self.download_version(
-                                obj.tag, obj.get('id'), int(obj.get('version')) - 1)
                         # First copy new version with locations
                         new = self.copy_with_locations(na_new, obj, locations)
                         # Store locations to db
                         self.store_locations(new)
-                        # Restore old version (locations already in the db)
-                        if old is not None:
-                            if isinstance(old, StoredObject):
-                                self.stored_to_xml(na_old, old)
-                            else:
+                        # Restore or download old version
+                        if old:
+                            self.stored_to_xml(na_old, old)
+                            # Again, no current locations to use stored ones.
+                            self.add_locations(na_old[0])
+                        else:
+                            old = self.download_version(
+                                obj.tag, obj.get('id'), int(obj.get('version')) - 1)
+                            if old is not None:
                                 na_old.append(old)
-                            self.add_locations(na_old[0], locations)
+                                self.add_locations(na_old[0], locations)
                         self.db.save_object(StoredObject(
                             obj.tag, obj.get('id'), obj.get('version'), tags,
                             self.get_node_ids(obj)

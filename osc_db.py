@@ -16,15 +16,15 @@ class StoredObject:
         if nodes is None:
             self.nodes = None
         elif isinstance(nodes, str):
-            self.nodes = [int(n) for n in nodes.split(',')]
+            self.nodes = nodes.split(',')
         else:
             # Also clears nodes if it's an empty list
-            self.nodes = None if not nodes else [int(n) for n in nodes]
+            self.nodes = None if not nodes else [str(n) for n in nodes]
         self.tags = json.loads(tags) if isinstance(tags, str) else tags
 
     @property
     def nodes_str(self):
-        return None if not self.nodes else ','.join([str(n) for n in self.nodes])
+        return None if not self.nodes else ','.join(self.nodes)
 
     @property
     def db_id(self):

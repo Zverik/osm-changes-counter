@@ -137,12 +137,14 @@ def write_header(output, table=None):
     if not table:
         output.write(col_names + '\n')
     else:
+        output.write("SET client_min_messages = 'ERROR';\n")
         output.write(f"create table if not exists {table} (\n")
         for c in COLUMNS:
             comma = '' if c == COLUMNS[-1] else ','
             output.write(f"    {c[0]} {c[1]}{comma}\n")
         output.write(");\n")
         # Copying into a temporary table
+        output.write(f"drop table if exists tmp_{table};\n")
         output.write(f"create table tmp_{table} (like {table} including defaults);\n")
         output.write(f"copy tmp_{table} ({col_names}) from stdin (format csv);\n")
 
