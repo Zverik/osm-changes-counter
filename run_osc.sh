@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-[ $# -lt 2 ] && echo "Usage: $0 psql_database_name tags.lst [<regions.csv>]" && exit 1
+[ $# -lt 2 ] && echo "Usage: $0 psql_database_name <tags.lst> [<regions.csv>]" && exit 1
 DBNAME="$1"
 TAGS="$2"
 REGIONS="${3-}"
