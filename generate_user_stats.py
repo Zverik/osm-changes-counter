@@ -212,9 +212,10 @@ if __name__ == '__main__':
                   osm_id_kind[1], osm_id_kind[2])
 
     # Writing the result
-    columns = ['user'] + sorted(columns[0]) + sorted(columns[1]) + ['score']
+    columns = ['user'] + sorted(columns[0]) + sorted(columns[1])
     if usergroups:
         columns.append('usergroup')
+    columns.append('score')
     if options.csv:
         data = count_by_user(result)
         for uid in list(data.keys()):
