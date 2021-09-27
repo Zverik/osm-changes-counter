@@ -61,11 +61,13 @@ class Weights:
 
     def get(self, osm_id, kind, is_modify):
         typ = row['osm_id'].split('/')[0]
+        base = self.types[typ]
         weight = self.weights.get(row['kind'], [1])
-        base = self.types[typ] * weight[0]
         if not is_modify:
-            return base
-        return base * (weight[1] if len(weight) > 1 else self.modify)
+            return base * weight[0]
+        elif len(weight) > 1:
+            return base * weight[1]
+        return base * weight[0] * self.modify
 
 
 def update_result(result, weights, current, osm_id, kind, region):

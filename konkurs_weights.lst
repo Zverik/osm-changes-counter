@@ -1,7 +1,8 @@
 modify: 0.5
 type.node: 1000
 type.way: 1
-crossing.modify: 0.9
+crossing: 0.8
+crossing.modify: 1
 crossing_island: 1.5
 traffic_calming: 1.1
 
