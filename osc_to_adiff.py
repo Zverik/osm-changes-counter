@@ -249,7 +249,7 @@ class AdiffBuilder:
         logging.debug('Queried OSM API for %s %s v%s, status code %s',
                       osm_type, osm_id, version, resp.status_code)
         if resp.status_code != 200:
-            return None
+            raise IOError(f'Could not download version {osm_type}/{osm_id}/{version}')
         return etree.fromstring(resp.content)[0]
 
     def iter_chunks(self, iterable, count):
