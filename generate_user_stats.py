@@ -204,6 +204,8 @@ if __name__ == '__main__':
                 # Undo last creation if there was one.
                 current[str(last_added)][0] = max(0, current[str(last_added)][0] - value)
                 current[str(last_added)][1] = 0
+            # Count as modification
+            current[uid][1] = value
             last_added = -int(uid)
         elif row['action'] == 'modify':
             current[uid][1] = value
