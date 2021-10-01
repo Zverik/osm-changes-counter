@@ -14,7 +14,10 @@ class Weights:
 
     def load(self, fileobj):
         for row in fileobj:
-            parts = [r.strip() for r in row.split(':', 1)]
+            line = row.strip()
+            if not line or line[0] == '#':
+                continue
+            parts = [r.strip() for r in line.split(':', 1)]
             if len(parts) != 2:
                 continue
             k = parts[0]

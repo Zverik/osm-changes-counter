@@ -17,7 +17,10 @@ class TagFilter:
 
     def load(self, fileobj):
         for row in fileobj:
-            parts = [k.lower() for k in row.strip().split()]
+            line = row.strip()
+            if not line or line[0] == '#':
+                continue
+            parts = [k.lower() for k in line.split()]
             if len(parts) > 1:
                 kind = parts[1].split('+')[0]
                 tag = parts[-1].split('+')[0]

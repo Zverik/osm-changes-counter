@@ -42,9 +42,9 @@ if __name__ == '__main__':
         print('Usage: {0} <gdocs_form.csv> <output.csv>')
         sys.exit(1)
 
-    uids = {}
-    usernames = {}
-    classes = {}
+    uids = {}  # login -> uid
+    usernames = {}  # name -> login
+    classes = {}  # uid -> class
     if os.path.exists(sys.argv[2]):
         with open(sys.argv[2], 'r') as f:
             for row in csv.reader(f):
@@ -55,9 +55,10 @@ if __name__ == '__main__':
                     if len(row) > 3 and row[3].strip():
                         classes[row[2]] = row[3]
 
-    predef_usernames = set(usernames.keys())
+    predef_usernames = set([k for k in usernames.keys() if uids.get(usernames[k])])
     with open(sys.argv[1], 'r') as f:
         for row in csv.reader(f):
+            # skip when we have uid for the person
             if row[1].strip() in predef_usernames:
                 continue
             username = row[4].strip()

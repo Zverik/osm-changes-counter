@@ -1,10 +1,10 @@
 modify: 0.5
 type.node: 1000
 type.way: 1
-crossing: 0.8
-crossing.modify: 1
-crossing_island: 1.5
-traffic_calming: 1.1
+# crossing: 0.8
+# crossing.modify: 1
+# crossing_island: 1.5
+# traffic_calming: 1.1
 
 usergroup.1: Опытные
 usergroup.2: Новички
