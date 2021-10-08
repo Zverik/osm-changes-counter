@@ -13,7 +13,7 @@ if [ ! -d venv ]; then
 fi
 
 PYTHON=venv/bin/python
-$PYTHON osc_to_adiff.py init -d "$DBNAME" -t "$TAGS" ${REGIONS+-r "$REGIONS"} "$EXTRACT"
+$PYTHON lib/osc_to_adiff.py init -d "$DBNAME" -t "$TAGS" ${REGIONS+-r "$REGIONS"} "$EXTRACT"
 
 PSQL=( psql "$DBNAME" -v ON_ERROR_STOP=1 )
 if [ -z "$INIT_SEQ" ]; then

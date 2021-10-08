@@ -17,8 +17,8 @@ for ts in $(seq $NEXT_SEQ $SEQ); do
     URL="$REPLICATION/000/$(printf %03d $(($ts/1000)))/$(printf %03d $(($ts%1000))).osc.gz"
     echo "$(date +%H:%M:%S): $URL"
     curl -s --fail "$URL" > $ts.osc.gz
-    $PYTHON osc_to_adiff.py process -d "$DBNAME" -t "$TAGS" ${REGIONS+-r "$REGIONS"} $ts.osc.gz -a $ts.adiff -vv 2> $ts.log
-    $PYTHON adiff_to_csv.py -t "$TAGS" -p osc_tracker ${REGIONS+-r "$REGIONS"} $ts.adiff > $ts.sql
+    $PYTHON lib/osc_to_adiff.py process -d "$DBNAME" -t "$TAGS" ${REGIONS+-r "$REGIONS"} $ts.osc.gz -a $ts.adiff -vv 2> $ts.log
+    $PYTHON lib/adiff_to_csv.py -t "$TAGS" -p osc_tracker ${REGIONS+-r "$REGIONS"} $ts.adiff > $ts.sql
     ${PSQL[@]} -f $ts.sql
     ${PSQL[@]} -qAtc "insert into osc_tracker_ts (ts) values ($ts);"
     sleep 5

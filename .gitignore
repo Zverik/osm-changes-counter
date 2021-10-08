@@ -5,8 +5,7 @@ u*.csv
 venv/
 __pycache__/
 *.osc
-[ansuo]*.csv
 *.pbf
 *.log
 *.sql
-[st]*.html
+data/
